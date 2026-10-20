@@ -1,0 +1,82 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.5; }
+.app { min-height: 100vh; }
+
+/* Login */
+.login { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #0f172a; }
+.login-card { background: #1e293b; padding: 2.5rem; border-radius: 16px; width: 380px; box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+.login-card h2 { margin-bottom: 1rem; color: #38bdf8; }
+.role-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.role-tabs button { flex: 1; padding: 0.5rem; border: 1px solid #334155; background: transparent; color: #94a3b8; border-radius: 6px; cursor: pointer; }
+.role-tabs button.active { background: #38bdf8; color: #000; border-color: #38bdf8; }
+.form { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+.form label { font-size: 0.85rem; color: #94a3b8; }
+.form input { padding: 0.6rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; }
+.form button { padding: 0.75rem; border: none; border-radius: 8px; background: #38bdf8; color: #000; font-weight: 700; cursor: pointer; }
+.btn-register { margin-top: 0.5rem; padding: 0.6rem; border: 1px solid #334155; background: transparent; color: #94a3b8; border-radius: 6px; cursor: pointer; width: 100%; }
+.error { color: #f87171; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.note { margin-top: 1rem; font-size: 0.8rem; color: #64748b; }
+
+/* Dashboards */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; background: #1e293b; border-bottom: 1px solid #334155; }
+.topbar h1 { font-size: 1.25rem; color: #38bdf8; }
+.user { color: #94a3b8; font-size: 0.9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+.card { background: #1e293b; border-radius: 12px; padding: 1.25rem; border: 1px solid #334155; }
+.card.big { grid-column: span 2; }
+.card h2 { margin-bottom: 0.75rem; font-size: 1rem; color: #94a3b8; }
+.status-badge { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700; margin-bottom: 0.75rem; }
+.status-badge.alert { background: #7f1d1d; color: #fecaca; border: 1px solid #b91c1c; }
+.status-badge.safe { background: #14532d; color: #bbf7d0; border: 1px solid #15803d; }
+.btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+button { padding: 0.6rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+.btn-panic { background: #dc2626; color: #fff; padding: 0.9rem 1.5rem; font-size: 1rem; flex: 1; }
+.btn-cancel { background: #64748b; color: #fff; flex: 1; }
+.btn-detect { background: #334155; color: #fff; flex: 1; }
+.btn-accept { background: #16a34a; color: #fff; }
+.btn-dismiss { background: #dc2626; color: #fff; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.hint { font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; }
+.empty { color: #64748b; font-style: italic; font-size: 0.85rem; }
+
+.contact-form { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.contact-form input { flex: 1; min-width: 90px; }
+.contact-list { list-style: none; max-height: 120px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; background: #0f172a; }
+.contact-list li { padding: 0.4rem 0; border-bottom: 1px solid #334155; font-size: 0.85rem; }
+
+.detection-log { max-height: 140px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; background: #0f172a; font-size: 0.8rem; }
+.log-row { padding: 0.3rem 0; border-bottom: 1px solid #1e293b; }
+
+.incident-card .empty { color: #64748b; }
+.dispatch-detail { border: 1px solid #334155; border-radius: 8px; padding: 1rem; background: #0f172a; margin-top: 0.5rem; }
+.route { margin-top: 0.5rem; font-size: 0.85rem; color: #94a3b8; }
+
+.checklist { display: flex; flex-direction: column; gap: 0.4rem; }
+.check-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; }
+.check-item input { width: 16px; height: 16px; }
+
+.patient-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+.patient-card { border: 1px solid #334155; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; background: #0f172a; }
+.patient-header span { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px; color: #fff; font-weight: 700; }
+.bg-red { background: #7f1d1d; }
+.bg-yellow { background: #713f12; color: #fcd34d; }
+.bg-green { background: #14532d; color: #bbf7d0; }
+
+/* Police map mock */
+.map-mock { position: relative; height: 220px; border: 1px dashed #334155; border-radius: 8px; background: #0f172a; margin-bottom: 0.5rem; }
+.map-label { position: absolute; top: 8px; left: 8px; font-size: 0.75rem; color: #64748b; background: rgba(15,23,42,.7); padding: 2px 6px; border-radius: 4px; }
+.roadblock-marker, .ambulance-marker { position: absolute; width: 160px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem; font-size: 0.75rem; color: #fff; pointer-events: none; }
+.roadblock-marker { border-color: #b91c1c; }
+.ambulance-marker { border-color: #16a34a; }
+.rb-dot, .amb-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.rb-dot { background: #b91c1c; box-shadow: 0 0 8px #b91c1c; }
+.amb-dot { background: #16a34a; box-shadow: 0 0 8px #16a34a; }
+.rb-label, .amb-label { font-weight: 700; font-size: 0.7rem; }
+.green-corridor-banner { background: #14532d; color: #bbf7d0; padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.85rem; text-align: center; }
+
+.block-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.block-form input { padding: 0.5rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; }
+.block-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+.alert-item { padding: 0.5rem 0; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+
+.icon { width: 1em; height: 1em; vertical-align: middle; }
