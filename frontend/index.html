@@ -92,7 +92,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <div id="app"></div>
 
 <script>
-const API = 'http://localhost:5000';
+const API = 'http://localhost:3000';
 let user = null;
 let socket = null;
 let contacts = [];
@@ -168,7 +168,7 @@ function showDashboard() {
 }
 
 function initSocket() {
-  socket = new WebSocket(`ws://localhost:5000`);
+  socket = new WebSocket(`ws://localhost:3000`);
   socket.onopen = () => {
     socket.send(JSON.stringify({ type: 'register:' + user.role, userId: user.id }));
   };
