@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -92,10 +92,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <div id="login-screen" class="login">
   <div class="login-card">
     <div class="role-tabs" id="role-tabs">
-      <button data-role="patient" class="active" onclick="toggleRole()">Patient</button>
-      <button data-role="ambulance" onclick="toggleRole()">Ambulance</button>
-      <button data-role="hospital" onclick="toggleRole()">Hospital</button>
-      <button data-role="police" onclick="toggleRole()">Police</button>
+      <button data-role="patient" class="active" onclick="toggleRole('patient')">Patient</button>
+      <button data-role="ambulance" onclick="toggleRole('ambulance')">Ambulance</button>
+      <button data-role="hospital" onclick="toggleRole('hospital')">Hospital</button>
+      <button data-role="police" onclick="toggleRole('police')">Police</button>
     </div>
     <input type="hidden" id="role" value="patient" />
     <h2 id="login-title">Patient / Ambulance Login</h2>
@@ -127,7 +127,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 <div id="dashboard-screen" style="display:none;">
   <div class="topbar">
     <h1 id="user-role">PATIENT</h1>
-    <div id="user-info">User · Mobile</div>
+    <div id="user-info">User Â· Mobile</div>
     <button onclick="localStorage.clear(); location.reload()">Logout</button>
   </div>
   <div class="grid">
@@ -146,7 +146,7 @@ let incidents = [];
 let roadBlocks = [];
 let ambulances = [];
 let dispatch = null;
-let status = 'available';
+let ambStatus = 'available';
 let panicActive = false;
 let countdown = 0;
 let autoDetect = false;
@@ -214,7 +214,7 @@ function loginOrRegister(type) {
 function showDashboard() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('dashboard-screen').style.display = 'block';
-  document.getElementById('user-info').textContent = `${user.name} · ${user.mobile}`;
+  document.getElementById('user-info').textContent = `${user.name} Â· ${user.mobile}`;
   document.getElementById('user-role').textContent = user.role.toUpperCase();
 
   document.getElementById('sec-patient').style.display = user.role === 'patient' ? 'block' : 'none';
@@ -238,8 +238,7 @@ function renderLogin() {
   document.getElementById('login-title').textContent = isMedical ? 'Patient / Ambulance Login' : 'Institution Login';
 }
 
-function toggleRole() {
-  const role = document.getElementById('role-tabs').querySelector('button.active')?.dataset.role || 'patient';
+function toggleRole(role) {
   document.getElementById('role').value = role;
   document.querySelectorAll('#role-tabs button').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   renderLogin();
@@ -390,7 +389,7 @@ async function loadIncidentsForAmbulance() {
   const myIncident = incidents.find(i => i.assignedAmbulanceId === user.ambulanceId);
   if (myIncident) {
     dispatch = myIncident;
-    status = 'busy';
+    ambStatus = 'busy';
   }
   renderAmbulance();
 }
@@ -398,27 +397,27 @@ async function loadIncidentsForAmbulance() {
 async function acceptDispatch() {
   if (!dispatch) return;
   await api(`/incidents/${dispatch.id}/severity`, 'POST', { severity: dispatch.severity });
-  status = 'en_route_patient';
+  ambStatus = 'en_route_patient';
   renderAmbulance();
 }
 
 function dismissDispatch() {
   dispatch = null;
-  status = 'available';
+  ambStatus = 'available';
   renderAmbulance();
 }
 
-function patientOnboard() { status = 'en_route_hospital'; renderAmbulance(); }
-function arrivedAtHospital() { status = 'available'; dispatch = null; renderAmbulance(); }
+function patientOnboard() { ambStatus = 'en_route_hospital'; renderAmbulance(); }
+function arrivedAtHospital() { ambStatus = 'available'; dispatch = null; renderAmbulance(); }
 
 function renderAmbulance() {
   document.getElementById('ambulance-content').innerHTML = `
     <div class="card big">
       <h2>Dispatch Alert</h2>
-      <div class="status-badge">${status.replace('_', ' ').toUpperCase()}</div>
+      <div class="status-badge">${ambStatus.replace('_', ' ').toUpperCase()}</div>
       ${dispatch ? `
         <div class="dispatch-detail">
-          <p>${dispatch.severity === 'severe' ? '🚑 ICU-ON-BOARD DISPATCH' : 'PATIENT PANIC ALERT'}</p>
+          <p>${dispatch.severity === 'severe' ? 'ðŸš‘ ICU-ON-BOARD DISPATCH' : 'PATIENT PANIC ALERT'}</p>
           <p>Patient at ${dispatch.lat.toFixed(4)}, ${dispatch.lng.toFixed(4)}</p>
           ${dispatch.route ? `<p>Route to patient: ${dispatch.route.eta}</p>` : ''}
           ${dispatch.autoRoute ? `<p>Auto-route to nearest hospital: ${dispatch.autoRoute.hospital}<br>ETA: ${dispatch.autoRoute.eta}</p>` : ''}
@@ -428,8 +427,8 @@ function renderAmbulance() {
           </div>
         </div>
       ` : '<p class="empty">Waiting for dispatch...</p>'}
-      ${status === 'en_route_patient' ? `<div class="btn-row" style="margin-top:1rem"><button class="btn-accept" onclick="patientOnboard()">Patient Onboard</button></div>` : ''}
-      ${status === 'en_route_hospital' ? `<button class="btn-accept" onclick="arrivedAtHospital()">Arrived at Hospital</button>` : ''}
+      ${ambStatus === 'en_route_patient' ? `<div class="btn-row" style="margin-top:1rem"><button class="btn-accept" onclick="patientOnboard()">Patient Onboard</button></div>` : ''}
+      ${ambStatus === 'en_route_hospital' ? `<button class="btn-accept" onclick="arrivedAtHospital()">Arrived at Hospital</button>` : ''}
     </div>
     <div class="card">
       <h2>Fleet Status</h2>
@@ -553,7 +552,7 @@ function renderPolice() {
           <div class="ambulance-marker" style="top:${20 + i*50}px; left:180px;"><div class="amb-dot"></div><div class="amb-label">Ambulance ${inc.assignedAmbulanceId}</div></div>
         `).join('')}
       </div>
-      ${corridorActive ? '<div class="green-corridor-banner">🚦 GREEN CORRIDOR ACTIVATED - Traffic signals cleared</div>' : ''}
+      ${corridorActive ? '<div class="green-corridor-banner">ðŸš¦ GREEN CORRIDOR ACTIVATED - Traffic signals cleared</div>' : ''}
     </div>
     <div class="card">
       <h2>Mark Road Blocked (VIP / Traffic)</h2>
