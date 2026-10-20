@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, useSocket } from '../App';
-import { Button, Alert, Bell, Phone, MapPin, User, Clock, ShieldAlert } from './components/UI';
+import { Button, Alert, Bell, Phone, MapPin, User, Clock, ShieldAlert } from '../components/UI.jsx';
 
 export default function PatientDashboard() {
   const { user } = useAuth();

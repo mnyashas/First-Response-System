@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, useSocket } from '../App';
-import { MapPin, Truck, Clock, ShieldAlert, Hospital, Bell, ArrowRight, X } from './components/UI';
+import { MapPin, Truck, Clock, ShieldAlert, Hospital, Bell, ArrowRight, X } from '../components/UI.jsx';
 
 export default function AmbulanceDashboard() {
   const { user } = useAuth();

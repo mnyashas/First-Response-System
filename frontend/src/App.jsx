@@ -25,11 +25,11 @@ export function SocketProvider({ children }) {
 export function useAuth() { return useContext(AuthContext); }
 export function useSocket() { return useContext(SocketContext); }
 
-import Login from './pages/Login';
-import PatientDashboard from './pages/PatientDashboard';
-import AmbulanceDashboard from './pages/AmbulanceDashboard';
-import HospitalDashboard from './pages/HospitalDashboard';
-import PoliceDashboard from './pages/PoliceDashboard';
+import Login from './pages/Login.jsx';
+import PatientDashboard from './pages/PatientDashboard.jsx';
+import AmbulanceDashboard from './pages/AmbulanceDashboard.jsx';
+import HospitalDashboard from './pages/HospitalDashboard.jsx';
+import PoliceDashboard from './pages/PoliceDashboard.jsx';
 
 function Protected({ role, children }) {
   const { user } = useAuth();

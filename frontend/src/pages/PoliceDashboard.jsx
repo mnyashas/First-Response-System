@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, useSocket } from '../App';
-import { MapPin, ShieldAlert, Truck, Clock, Plus, X, Trash2 } from './components/UI';
+import { MapPin, ShieldAlert, Truck, Clock, Plus, X, Trash2 } from '../components/UI.jsx';
 
 export default function PoliceDashboard() {
   const { user } = useAuth();

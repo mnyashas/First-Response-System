@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth, useSocket } from '../App';
-import { Hospital, User, Clock, ShieldAlert, CheckCircle, X, List } from './components/UI';
+import { Hospital, User, Clock, ShieldAlert, CheckCircle, X, List } from '../components/UI.jsx';
 
 const EQUIPMENT = ['Ventilator', 'Defibrillator', 'Trauma Bed', 'Blood Bank', 'Cardiac Monitor', 'Oxygen Cylinder'];
 
