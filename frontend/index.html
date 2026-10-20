@@ -54,7 +54,6 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .detection-log { max-height: 140px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; background: #0f172a; font-size: 0.8rem; }
 .log-row { padding: 0.3rem 0; border-bottom: 1px solid #1e293b; }
 
-.incident-card .empty { color: #64748b; }
 .dispatch-detail { border: 1px solid #334155; border-radius: 8px; padding: 1rem; background: #0f172a; margin-top: 0.5rem; }
 .route { margin-top: 0.5rem; font-size: 0.85rem; color: #94a3b8; }
 
@@ -89,17 +88,62 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
-<div id="app"></div>
+
+<div id="login-screen" class="login">
+  <div class="login-card">
+    <div class="role-tabs" id="role-tabs">
+      <button data-role="patient" class="active" onclick="toggleRole()">Patient</button>
+      <button data-role="ambulance" onclick="toggleRole()">Ambulance</button>
+      <button data-role="hospital" onclick="toggleRole()">Hospital</button>
+      <button data-role="police" onclick="toggleRole()">Police</button>
+    </div>
+    <input type="hidden" id="role" value="patient" />
+    <h2 id="login-title">Patient / Ambulance Login</h2>
+    <div id="login-error" class="error"></div>
+    <form onsubmit="event.preventDefault(); loginOrRegister('login');" class="form">
+      <label>Name</label>
+      <input id="name" required />
+      <label>Mobile No</label>
+      <input id="mobile" type="tel" required />
+      <label id="extra-label">Aadhaar Card No</label>
+      <input id="extra" placeholder="Enter Aadhaar" required />
+      <div id="extra2-row" style="display:none;">
+        <label>Address</label>
+        <input id="extra2" />
+      </div>
+      <div id="rec-label-row" style="display:none;">
+        <label>Receptionist Name</label>
+        <input id="recname" />
+      </div>
+      <button type="submit">Login</button>
+    </form>
+    <p class="note">New user? Register instead:</p>
+    <button onclick="event.preventDefault(); loginOrRegister('register');" class="btn-register">Register</button>
+    <div class="hint">Demo: Patient mobile 9876543210 · Ambulance 9988776655 · Hospital/Police any</div>
+  </div>
+</div>
+
+<div id="dashboard-screen" style="display:none;">
+  <div class="topbar">
+    <h1 id="user-role">PATIENT</h1>
+    <div id="user-info">User · Mobile</div>
+    <button onclick="localStorage.clear(); location.reload()">Logout</button>
+  </div>
+  <div class="grid">
+    <div id="sec-patient" class="section"><div id="patient-content"></div></div>
+    <div id="sec-ambulance" class="section"><div id="ambulance-content"></div></div>
+    <div id="sec-hospital" class="section"><div id="hospital-content"></div></div>
+    <div id="sec-police" class="section"><div id="police-content"></div></div>
+  </div>
+</div>
 
 <script>
 const API = 'http://localhost:3000';
 let user = null;
-let socket = null;
 let contacts = [];
 let incidents = [];
 let roadBlocks = [];
 let ambulances = [];
-let hospitals = [];
 let dispatch = null;
 let status = 'available';
 let panicActive = false;
@@ -108,16 +152,18 @@ let autoDetect = false;
 let detectionLog = [];
 let ready = false;
 let equipment = {};
-let blockReason = '';
-let blockLat = '28.6139';
-let blockLng = '77.2090';
 let corridorActive = false;
-
-const app = document.getElementById('app');
 
 function showSection(id) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+}
+
+async function api(endpoint, method = 'GET', body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + endpoint, opts);
+  return res.json();
 }
 
 function loginOrRegister(type) {
@@ -126,27 +172,22 @@ function loginOrRegister(type) {
   const mobile = document.getElementById('mobile').value;
   const extra = document.getElementById('extra').value;
   const extra2 = document.getElementById('extra2').value;
+  const recname = document.getElementById('recname').value;
   const errEl = document.getElementById('login-error');
   errEl.textContent = '';
 
   let body = { role, name, mobile };
   if (role === 'patient' || role === 'ambulance') body.aadhaar = extra;
-  else { body.institutionName = extra; body.address = extra2; body.receptionistName = name; }
+  else { body.institutionName = extra; body.address = extra2; body.receptionistName = recname; }
 
-  fetch(`${API}/auth/${type}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (!data.user) { errEl.textContent = data.error || 'Failed'; return; }
-    user = data.user;
-    localStorage.setItem('fr_user', JSON.stringify(user));
-    initSocket();
-    showDashboard();
-  })
-  .catch(err => { errEl.textContent = err.message; });
+  api(`/auth/${type}`, 'POST', body)
+    .then(data => {
+      if (!data.user) { errEl.textContent = data.error || 'Failed'; return; }
+      user = data.user;
+      localStorage.setItem('fr_user', JSON.stringify(user));
+      showDashboard();
+    })
+    .catch(err => { errEl.textContent = err.message; });
 }
 
 function showDashboard() {
@@ -155,73 +196,52 @@ function showDashboard() {
   document.getElementById('user-info').textContent = `${user.name} · ${user.mobile}`;
   document.getElementById('user-role').textContent = user.role.toUpperCase();
 
-  const role = user.role;
-  document.getElementById('sec-patient').style.display = role === 'patient' ? 'block' : 'none';
-  document.getElementById('sec-ambulance').style.display = role === 'ambulance' ? 'block' : 'none';
-  document.getElementById('sec-hospital').style.display = role === 'hospital' ? 'block' : 'none';
-  document.getElementById('sec-police').style.display = role === 'police' ? 'block' : 'none';
+  document.getElementById('sec-patient').style.display = user.role === 'patient' ? 'block' : 'none';
+  document.getElementById('sec-ambulance').style.display = user.role === 'ambulance' ? 'block' : 'none';
+  document.getElementById('sec-hospital').style.display = user.role === 'hospital' ? 'block' : 'none';
+  document.getElementById('sec-police').style.display = user.role === 'police' ? 'block' : 'none';
 
-  if (role === 'patient') loadPatient();
-  if (role === 'ambulance') loadAmbulance();
-  if (role === 'hospital') loadHospital();
-  if (role === 'police') loadPolice();
+  if (user.role === 'patient') { initPatient(); }
+  if (user.role === 'ambulance') { initAmbulance(); }
+  if (user.role === 'hospital') { initHospital(); }
+  if (user.role === 'police') { initPolice(); }
 }
 
-function initSocket() {
-  socket = new WebSocket(`ws://localhost:3000`);
-  socket.onopen = () => {
-    socket.send(JSON.stringify({ type: 'register:' + user.role, userId: user.id }));
-  };
-  socket.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === 'incident:created' && user.role === 'patient' && msg.data.patientId === user.id) {
-      dispatch = msg.data;
-      renderPatient();
-    }
-    if (msg.type === 'ambulance:dispatch' && user.role === 'ambulance') {
-      dispatch = msg.data;
-      status = 'busy';
-      renderAmbulance();
-    }
-    if (msg.type === 'police:incident' && user.role === 'police') {
-      incidents.unshift(msg.data);
-      renderPolice();
-    }
-  };
-}
-
-// ---------- LOGIN SCREEN ----------
 function renderLogin() {
-  const isMedical = document.getElementById('role').value === 'patient' || document.getElementById('role').value === 'ambulance';
-  const extraLabel = isMedical ? 'Aadhaar Card No' : 'Name of Hospital / Police Unit';
-  const extraPlaceholder = isMedical ? 'Enter Aadhaar' : 'Institution Name';
-  document.getElementById('extra-label').textContent = extraLabel;
-  document.getElementById('extra').placeholder = extraPlaceholder;
+  const role = document.getElementById('role').value;
+  const isMedical = role === 'patient' || role === 'ambulance';
+  document.getElementById('extra-label').textContent = isMedical ? 'Aadhaar Card No' : 'Name of Hospital / Police Unit';
+  document.getElementById('extra').placeholder = isMedical ? 'Enter Aadhaar' : 'Institution Name';
   document.getElementById('extra2-row').style.display = isMedical ? 'none' : 'block';
   document.getElementById('rec-label-row').style.display = isMedical ? 'none' : 'block';
+  document.getElementById('login-title').textContent = isMedical ? 'Patient / Ambulance Login' : 'Institution Login';
 }
 
 function toggleRole() {
-  const role = document.getElementById('role').value;
+  const role = document.getElementById('role-tabs').querySelector('button.active')?.dataset.role || 'patient';
+  document.getElementById('role').value = role;
   document.querySelectorAll('#role-tabs button').forEach(b => b.classList.toggle('active', b.dataset.role === role));
   renderLogin();
 }
 
 // ---------- PATIENT ----------
-function loadPatient() {
+function initPatient() {
   renderPatient();
-  setInterval(renderPatient, 3000);
+  setInterval(() => { fetchIncidents(); renderPatient(); }, 3000);
+}
+
+async function fetchIncidents() {
+  incidents = await api('/incidents');
 }
 
 function triggerPanic() {
   if (panicActive || autoDetect) return;
   panicActive = true;
   countdown = 15;
-  document.getElementById('panic-status').textContent = `PANIC ACTIVE - ${countdown}s`;
-  document.getElementById('panic-status').className = 'status-badge alert';
+  updatePanicStatus();
   const timer = setInterval(() => {
     countdown--;
-    document.getElementById('panic-status').textContent = `PANIC ACTIVE - ${countdown}s`;
+    updatePanicStatus();
     if (countdown <= 1) {
       clearInterval(timer);
       panicActive = false;
@@ -234,35 +254,34 @@ function cancelPanic() {
   panicActive = false;
   autoDetect = false;
   countdown = 0;
-  document.getElementById('panic-status').textContent = 'Safe';
-  document.getElementById('panic-status').className = 'status-badge safe';
+  updatePanicStatus();
 }
 
-function sendPanic() {
+function updatePanicStatus() {
+  const el = document.getElementById('panic-status');
+  el.textContent = panicActive ? `PANIC ACTIVE - ${countdown}s` : autoDetect ? `CRASH DETECTED - ${countdown}s` : 'Safe';
+  el.className = 'status-badge ' + (panicActive || autoDetect ? 'alert' : 'safe');
+}
+
+async function sendPanic() {
   const lat = 28.6139 + (Math.random() * 0.01 - 0.005);
   const lng = 77.2090 + (Math.random() * 0.01 - 0.005);
-  fetch(`${API}/incidents`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patientId: user.id, patientName: user.name, lat, lng, severity: 'normal', contacts })
-  })
-  .then(r => r.json())
-  .then(data => { dispatch = data.incident; renderPatient(); })
-  .catch(err => console.error(err));
+  const data = await api('/incidents', 'POST', { patientId: user.id, patientName: user.name, lat, lng, severity: 'normal', contacts });
+  dispatch = data.incident;
+  renderPatient();
 }
 
 function simulateCrash() {
   if (panicActive || autoDetect) return;
   autoDetect = true;
   countdown = 10;
-  document.getElementById('panic-status').textContent = `CRASH DETECTED - ${countdown}s`;
-  document.getElementById('panic-status').className = 'status-badge alert';
+  updatePanicStatus();
   const impact = Math.random();
   if (impact > 0.7) {
     detectionLog.unshift({ time: new Date().toLocaleTimeString(), event: 'Sudden deceleration + impact detected' });
     const timer = setInterval(() => {
       countdown--;
-      document.getElementById('panic-status').textContent = `CRASH DETECTED - ${countdown}s`;
+      updatePanicStatus();
       if (countdown <= 1) {
         clearInterval(timer);
         autoDetect = false;
@@ -271,7 +290,7 @@ function simulateCrash() {
     }, 1000);
   } else {
     detectionLog.unshift({ time: new Date().toLocaleTimeString(), event: 'Minor vibration - ignored (false-alert prevention)' });
-    setTimeout(() => { autoDetect = false; document.getElementById('panic-status').textContent = 'Safe'; document.getElementById('panic-status').className = 'status-badge safe'; }, 1500);
+    setTimeout(() => { autoDetect = false; updatePanicStatus(); }, 1500);
   }
   renderPatient();
 }
@@ -289,9 +308,8 @@ function addContact() {
 }
 
 function renderPatient() {
-  const isMedical = true;
-  const medicalFields = document.getElementById('patient-medical-fields');
-  medicalFields.style.display = 'block';
+  const myIncidents = incidents.filter(i => i.patientId === user.id);
+  dispatch = myIncidents[0] || null;
   document.getElementById('patient-content').innerHTML = `
     <div class="card big">
       <h2>Emergency Status</h2>
@@ -337,18 +355,30 @@ function renderPatient() {
 }
 
 // ---------- AMBULANCE ----------
-function loadAmbulance() {
-  fetch(`${API}/ambulances`).then(r => r.json()).then(data => { ambulances = data; renderAmbulance(); });
-  setInterval(() => fetch(`${API}/ambulances`).then(r => r.json()).then(data => { ambulances = data; renderAmbulance(); }), 5000);
+function initAmbulance() {
+  loadAmbulances();
+  setInterval(() => { loadAmbulances(); loadIncidentsForAmbulance(); }, 5000);
 }
 
-function acceptDispatch() {
+async function loadAmbulances() {
+  ambulances = await api('/ambulances');
+}
+
+async function loadIncidentsForAmbulance() {
+  incidents = await api('/incidents');
+  const myIncident = incidents.find(i => i.assignedAmbulanceId && ambulances.some(a => a.userId === user.id && a.id === i.assignedAmbulanceId));
+  if (myIncident) {
+    dispatch = myIncident;
+    status = 'busy';
+  }
+  renderAmbulance();
+}
+
+async function acceptDispatch() {
   if (!dispatch) return;
-  fetch(`${API}/incidents/${dispatch.id}/severity`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ severity: dispatch.severity })
-  }).then(() => { status = 'en_route_patient'; renderAmbulance(); });
+  await api(`/incidents/${dispatch.id}/severity`, 'POST', { severity: dispatch.severity });
+  status = 'en_route_patient';
+  renderAmbulance();
 }
 
 function dismissDispatch() {
@@ -394,29 +424,27 @@ function renderAmbulance() {
 }
 
 // ---------- HOSPITAL ----------
-function loadHospital() {
-  setInterval(() => {
-    fetch(`${API}/incidents`).then(r => r.json()).then(data => {
-      incidents = data;
-      renderHospital();
-    });
-  }, 3000);
-  fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderHospital(); });
+function initHospital() {
+  loadHospitalData();
+  setInterval(loadHospitalData, 3000);
 }
 
-function markERReady() {
-  const target = incidents.find(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
-  if (!target) return;
-  const eq = Object.entries(equipment).filter(([_, v]) => v).map(([k]) => k);
-  fetch(`${API}/hospitals/er-ready`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ hospitalId: user.id, incidentId: target.id, equipment: eq })
-  }).then(() => { ready = true; renderHospital(); });
+async function loadHospitalData() {
+  incidents = await api('/incidents');
+  renderHospital();
 }
 
 function toggleEquip(item) {
   equipment[item] = !equipment[item];
+  renderHospital();
+}
+
+async function markERReady() {
+  const target = incidents.find(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
+  if (!target) return;
+  const eq = Object.entries(equipment).filter(([_, v]) => v).map(([k]) => k);
+  await api('/hospitals/er-ready', 'POST', { hospitalId: user.id, incidentId: target.id, equipment: eq });
+  ready = true;
   renderHospital();
 }
 
@@ -459,38 +487,34 @@ function renderHospital() {
 }
 
 // ---------- POLICE ----------
-function loadPolice() {
-  setInterval(() => {
-    fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderPolice(); });
-    fetch(`${API}/police/roadblocks`).then(r => r.json()).then(data => { roadBlocks = data; renderPolice(); });
-  }, 3000);
-  fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderPolice(); });
-  fetch(`${API}/police/roadblocks`).then(r => r.json()).then(data => { roadBlocks = data; renderPolice(); });
+function initPolice() {
+  loadPoliceData();
+  setInterval(loadPoliceData, 3000);
 }
 
-function addRoadBlock() {
+async function loadPoliceData() {
+  incidents = await api('/incidents');
+  roadBlocks = await api('/police/roadblocks');
+  renderPolice();
+}
+
+async function addRoadBlock() {
   const reason = document.getElementById('block-reason').value;
   const lat = parseFloat(document.getElementById('block-lat').value);
   const lng = parseFloat(document.getElementById('block-lng').value);
-  fetch(`${API}/police/roadblock`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reason, lat, lng, createdBy: user.name })
-  }).then(() => { document.getElementById('block-reason').value = ''; renderPolice(); });
+  await api('/police/roadblock', 'POST', { reason, lat, lng, createdBy: user.name });
+  document.getElementById('block-reason').value = '';
+  loadPoliceData();
 }
 
 function clearBlock(id) {
-  fetch(`${API}/police/roadblock/${id}/clear`, { method: 'POST' }).then(renderPolice);
+  api(`/police/roadblock/${id}/clear`, 'POST').then(loadPoliceData);
 }
 
 function activateGreenCorridor() {
   const inc = incidents.find(i => i.status === 'assigned');
   if (!inc) return;
-  fetch(`${API}/police/greencorridor`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ incidentId: inc.id })
-  }).then(() => { corridorActive = true; renderPolice(); });
+  api('/police/greencorridor', 'POST', { incidentId: inc.id }).then(() => { corridorActive = true; loadPoliceData(); });
 }
 
 function renderPolice() {
@@ -544,52 +568,5 @@ function renderPolice() {
 renderLogin();
 
 </script>
-
-<div id="login-screen" class="login">
-  <div class="login-card">
-    <div class="role-tabs" id="role-tabs">
-      <button data-role="patient" class="active" onclick="toggleRole()">Patient</button>
-      <button data-role="ambulance" onclick="toggleRole()">Ambulance</button>
-      <button data-role="hospital" onclick="toggleRole()">Hospital</button>
-      <button data-role="police" onclick="toggleRole()">Police</button>
-    </div>
-    <h2 id="login-title">Patient / Ambulance Login</h2>
-    <div id="login-error" class="error"></div>
-    <form onsubmit="event.preventDefault(); loginOrRegister('login');" class="form">
-      <label>Name</label>
-      <input id="name" required />
-      <label>Mobile No</label>
-      <input id="mobile" type="tel" required />
-      <label id="extra-label">Aadhaar Card No</label>
-      <input id="extra" placeholder="Enter Aadhaar" required />
-      <div id="extra2-row" style="display:none;">
-        <label>Address</label>
-        <input id="extra2" required />
-      </div>
-      <div id="rec-label-row" style="display:none;">
-        <label>Receptionist Name</label>
-        <input id="name" required />
-      </div>
-      <button type="submit">Login</button>
-    </form>
-    <p className="note">New user? Register instead:</p>
-    <button onclick="event.preventDefault(); loginOrRegister('register');" class="btn-register">Register</button>
-    <div class="hint">Demo: Patient mobile 9876543210 · Ambulance 9988776655 · Hospital/Police any</div>
-  </div>
-</div>
-
-<div id="dashboard-screen" style="display:none;">
-  <div class="topbar">
-    <h1 id="user-role">PATIENT</h1>
-    <div id="user-info">User · Mobile</div>
-    <button onclick="localStorage.clear(); location.reload()">Logout</button>
-  </div>
-  <div class="grid">
-    <div id="sec-patient" class="section" style="display:none;"><div id="patient-medical-fields" style="display:none;"></div><div id="patient-content"></div></div>
-    <div id="sec-ambulance" class="section" style="display:none;"><div id="ambulance-content"></div></div>
-    <div id="sec-hospital" class="section" style="display:none;"><div id="hospital-content"></div></div>
-    <div id="sec-police" class="section" style="display:none;"><div id="police-content"></div></div>
-  </div>
-</div>
 </body>
 </html>
