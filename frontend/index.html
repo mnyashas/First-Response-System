@@ -119,7 +119,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     </form>
     <p class="note">New user? Register instead:</p>
     <button onclick="event.preventDefault(); loginOrRegister('register');" class="btn-register">Register</button>
-    <div class="hint">Demo: Patient mobile 9876543210 · Ambulance 9988776655 · Hospital/Police any</div>
+    <div class="hint">Register first, then login with your credentials.</div>
   </div>
 </div>
 
@@ -366,7 +366,7 @@ async function loadAmbulances() {
 
 async function loadIncidentsForAmbulance() {
   incidents = await api('/incidents');
-  const myIncident = incidents.find(i => i.assignedAmbulanceId && ambulances.some(a => a.userId === user.id && a.id === i.assignedAmbulanceId));
+  const myIncident = incidents.find(i => i.assignedAmbulanceId === user.ambulanceId);
   if (myIncident) {
     dispatch = myIncident;
     status = 'busy';
@@ -449,7 +449,7 @@ async function markERReady() {
 }
 
 function renderHospital() {
-  const hospIncidents = incidents.filter(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
+  const hospIncidents = incidents.filter(i => i.assignedHospitalId === user.hospitalId || !i.assignedHospitalId);
   const equipList = ['Ventilator','Defibrillator','Trauma Bed','Blood Bank','Cardiac Monitor','Oxygen Cylinder'];
   document.getElementById('hospital-content').innerHTML = `
     <div class="card big">

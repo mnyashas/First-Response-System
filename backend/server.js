@@ -23,23 +23,7 @@ const roadBlocks = [];
 const greenCorridors = [];
 
 function seed() {
-  users.push({ id: 'u1', role: 'patient', name: 'Rahul Sharma', mobile: '9876543210', aadhaar: '123456789012', createdAt: new Date().toISOString() });
-  emergencyContacts['u1'] = [
-    { name: 'Priya Sharma', phone: '9123456780', relation: 'Spouse' },
-    { name: 'City Hospital', phone: '9123456781', relation: 'Hospital' }
-  ];
-
-  users.push({ id: 'u2', role: 'ambulance', name: 'Amit Driver', mobile: '9988776655', aadhaar: '234567890123', createdAt: new Date().toISOString() });
-  ambulances.push({ id: 'amb1', userId: 'u2', driverName: 'Amit Driver', mobile: '9988776655', status: 'available', lat: 28.6139, lng: 77.2090, type: 'normal', socketId: null });
-
-  users.push({ id: 'u3', role: 'ambulance', name: 'Suresh ICU Driver', mobile: '9911223344', aadhaar: '345678901234', createdAt: new Date().toISOString() });
-  ambulances.push({ id: 'amb2', userId: 'u3', driverName: 'Suresh ICU Driver', mobile: '9911223344', status: 'available', lat: 28.6200, lng: 77.2150, type: 'icu', socketId: null });
-
-  users.push({ id: 'u4', role: 'hospital', name: 'City General Hospital', address: '123 MG Road, Delhi', receptionistName: 'Neha Receptionist', lat: 28.6150, lng: 77.2050, equipment: ['Ventilator', 'Defibrillator', 'Trauma Bed', 'Blood Bank'], createdAt: new Date().toISOString() });
-  hospitals.push({ id: 'h1', userId: 'u4', name: 'City General Hospital', address: '123 MG Road, Delhi', receptionistName: 'Neha Receptionist', lat: 28.6150, lng: 77.2050, equipment: ['Ventilator', 'Defibrillator', 'Trauma Bed', 'Blood Bank'] });
-
-  users.push({ id: 'u5', role: 'police', name: 'Central Police Control Room', address: 'Police HQ, Delhi', receptionistName: 'Rajesh Officer', lat: 28.6100, lng: 77.2000, createdAt: new Date().toISOString() });
-  policeUnits.push({ id: 'p1', userId: 'u5', name: 'Central Police Control Room', address: 'Police HQ, Delhi', receptionistName: 'Rajesh Officer', socketId: null });
+  // No demo data — user registers fresh
 }
 seed();
 
@@ -81,6 +65,22 @@ app.post('/auth/register', (req, res) => {
   const id = uuidv4();
   const user = { id, role, name, mobile, ...(aadhaar ? { aadhaar } : {}), ...(role === 'hospital' || role === 'police' ? { institutionName, address, receptionistName } : {}), createdAt: new Date().toISOString() };
   users.push(user);
+  // Add to role-specific arrays and store internal id on user
+  if (role === 'ambulance') {
+    const ambId = 'amb-' + id;
+    ambulances.push({ id: ambId, userId: id, driverName: name, mobile, status: 'available', lat: 28.6139, lng: 77.2090, type: 'normal', socketId: null });
+    user.ambulanceId = ambId;
+  }
+  if (role === 'hospital') {
+    const hospId = 'h-' + id;
+    hospitals.push({ id: hospId, userId: id, name, address, receptionistName, lat: 28.6150, lng: 77.2050, equipment: [] });
+    user.hospitalId = hospId;
+  }
+  if (role === 'police') {
+    const policeId = 'p-' + id;
+    policeUnits.push({ id: policeId, userId: id, name, address, receptionistName, socketId: null });
+    user.policeId = policeId;
+  }
   res.json({ user, token: `mock-${id}` });
 });
 
