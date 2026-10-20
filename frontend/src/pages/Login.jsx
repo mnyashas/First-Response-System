@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, ShieldAlert, Building2, Landmark, Wifi, AlertCircle } from '../components/UI.jsx';
+import { User, ShieldAlert, Building2, Landmark, AlertCircle } from '../components/UI.jsx';
 
 const API = 'http://localhost:5000';
 
@@ -13,17 +13,8 @@ export default function Login() {
   const [extra2, setExtra2] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [backendOk, setBackendOk] = useState(null);
 
   const isMedical = role === 'patient' || role === 'ambulance';
-
-  useEffectCheckBackend();
-
-  function useEffectCheckBackend() {
-    fetch(`${API}/health`, { mode: 'cors' })
-      .then(() => setBackendOk(true))
-      .catch(() => setBackendOk(false));
-  }
 
   async function handleSubmit(e, type) {
     e.preventDefault();
@@ -36,43 +27,18 @@ export default function Login() {
 
     try {
       const res = await fetch(`${API}/auth/${type}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Server error' }));
-        throw new Error(err.error || `HTTP ${res.status}`);
-      }
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Login failed (${res.status})`);
       localStorage.setItem('fr_user', JSON.stringify(data.user));
       navigate(`/${role}`);
     } catch (err) {
       setError(err.message);
       setLoading(false);
     }
-  }
-
-  if (backendOk === false) {
-    return (
-      <div className="login">
-        <div className="login-card">
-          <div className="role-tabs">
-            {['patient', 'ambulance', 'hospital', 'police'].map(r => (
-              <button key={r} className={role === r ? 'active' : ''} onClick={() => setRole(r)}>{r.charAt(0).toUpperCase() + r.slice(1)}</button>
-            ))}
-          </div>
-          <h2 style={{ color: '#f87171' }}>Backend Not Running</h2>
-          <div className="error">
-            <AlertCircle size={24} /> Cannot connect to http://localhost:5000
-          </div>
-          <p>Start the backend first:</p>
-          <pre style={{ background: '#0f172a', padding: '1rem', borderRadius: '6px', overflow: 'x-auto' }}>
-cd "C:\Users\User\Desktop\first response system\backend"
-npm start
-          </pre>
-          <button onClick={useEffectCheckBackend} className="btn-accept">Retry Connection Check</button>
-        </div>
-      </div>
-    );
   }
 
   return (
