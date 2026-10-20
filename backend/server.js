@@ -55,12 +55,13 @@ function isBlocked(lat, lng) {
 // ---------- Auth ----------
 app.post('/auth/register', (req, res) => {
   const { role, name, mobile, aadhaar, institutionName, address, receptionistName } = req.body;
-  if (!role || !name || !mobile) return res.status(400).json({ error: 'Missing fields' });
+  console.log('REGISTER body:', req.body);
+  if (!role || !name || !mobile) return res.status(400).json({ error: 'Missing fields: role, name, mobile required' });
   if (role === 'hospital' || role === 'police') {
-    if (!institutionName || !address || !receptionistName) return res.status(400).json({ error: 'Institution details required' });
+    if (!institutionName || !address || !receptionistName) return res.status(400).json({ error: 'Hospital/Police: institution name, address, and receptionist name are all required' });
   }
   if (role === 'patient' || role === 'ambulance') {
-    if (!aadhaar) return res.status(400).json({ error: 'Aadhaar required' });
+    if (!aadhaar) return res.status(400).json({ error: 'Aadhaar Card No is required' });
   }
   const id = uuidv4();
   const user = { id, role, name, mobile, ...(aadhaar ? { aadhaar } : {}), ...(role === 'hospital' || role === 'police' ? { institutionName, address, receptionistName } : {}), createdAt: new Date().toISOString() };
@@ -86,8 +87,9 @@ app.post('/auth/register', (req, res) => {
 
 app.post('/auth/login', (req, res) => {
   const { role, mobile } = req.body;
+  console.log('LOGIN body:', req.body);
   const user = users.find(u => u.role === role && u.mobile === mobile);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!user) return res.status(401).json({ error: 'Invalid credentials - register first' });
   res.json({ user, token: `mock-${user.id}` });
 });
 
