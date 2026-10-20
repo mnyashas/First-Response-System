@@ -45,7 +45,7 @@ input:focus,select:focus{border-color:#3b82f6}
 .status-chip{padding:8px 16px;background:#0f172a;border:1px solid #1e293b;border-radius:20px;font-size:12px;display:flex;align-items:center;gap:6px}
 .dot{width:8px;height:8px;border-radius:50%;background:#10b981}
 .dot.red{background:#ef4444}.dot.yellow{background:#f59e0b}.dot.blue{background:#3b82f6}
-#map{height:400px;border-radius:12px;border:1px solid #1e293b;z-index:1}
+#map,#mapAmb,#mapHosp{height:400px;border-radius:12px;border:1px solid #1e293b;z-index:1}
 #mapSmall{height:260px;border-radius:12px;border:1px solid #1e293b;z-index:1}
 .steps{display:flex;gap:4px;margin:14px 0;flex-wrap:wrap}
 .step{flex:1;min-width:80px;text-align:center;padding:10px 6px;background:#0f172a;border-radius:8px;font-size:11px;color:#64748b;border:1px solid #1e293b}
@@ -103,6 +103,18 @@ tr:hover td{background:#0f172a}
   <div id="topActions">
     <button class="btn btn-ghost" id="btnLogout" onclick="logout()" style="display:none">Logout</button>
   </div>
+</div>
+
+<!-- Shared manual location bar (shown when logged in) -->
+<div id="manualLocBar" class="hidden" style="background:#0f172a;border-bottom:1px solid #1e293b;padding:10px 24px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <span style="font-size:12px;color:#9ca3af;font-weight:600">📍 Location:</span>
+  <input type="text" id="manualLat" placeholder="Latitude" style="width:130px;padding:6px 10px;font-size:13px">
+  <input type="text" id="manualLng" placeholder="Longitude" style="width:130px;padding:6px 10px;font-size:13px">
+  <button class="btn btn-primary" style="padding:6px 14px" onclick="setManualLocation()">Set</button>
+  <button class="btn btn-ghost" style="padding:6px 10px" onclick="setManualLocation('18.5204','73.8567')">Pune</button>
+  <button class="btn btn-ghost" style="padding:6px 10px" onclick="setManualLocation('28.6139','77.2090')">Delhi</button>
+  <button class="btn btn-ghost" style="padding:6px 10px" onclick="setManualLocation('19.0760','72.8777')">Mumbai</button>
+  <button class="btn btn-ghost" style="padding:6px 10px" onclick="startGPS()">🔄 Retry GPS</button>
 </div>
 
 <!-- ==================== AUTH VIEW ==================== -->
@@ -487,12 +499,12 @@ let contacts = [];
 let pendingDispatch = null;
 
 // ==================== TOAST ====================
-function toast(msg, type='info') {
+function toast(msg, type='info', ms=4000) {
   const t = document.createElement('div');
   t.className = 'toast ' + type;
   t.textContent = msg;
   document.body.appendChild(t);
-  setTimeout(() => t.remove(), 4000);
+  setTimeout(() => t.remove(), ms);
 }
 
 function log(container, msg, type='msg') {
@@ -580,12 +592,14 @@ function logout() {
   document.getElementById('viewAuth').classList.remove('hidden');
   ['viewPatient','viewAmbulance','viewHospital','viewPolice'].forEach(v => document.getElementById(v).classList.add('hidden'));
   document.getElementById('btnLogout').style.display = 'none';
+  document.getElementById('manualLocBar').classList.add('hidden');
   document.getElementById('userInfo').textContent = 'Not logged in';
 }
 
 function showDashboard() {
   document.getElementById('viewAuth').classList.add('hidden');
   document.getElementById('btnLogout').style.display = '';
+  document.getElementById('manualLocBar').classList.remove('hidden');
   const name = currentUser.institutionName || currentUser.name;
   document.getElementById('userInfo').textContent = `${name} (${currentRole})`;
   ['viewPatient','viewAmbulance','viewHospital','viewPolice'].forEach(v => document.getElementById(v).classList.add('hidden'));
@@ -613,7 +627,7 @@ function stopAll() {
 
 // ==================== GPS ====================
 function startGPS() {
-  if (!navigator.geolocation) { toast('Geolocation not supported', 'error'); return; }
+  if (!navigator.geolocation) { toast('Geolocation not supported — use manual location above', 'error'); return; }
   gpsWatchId = navigator.geolocation.watchPosition(pos => {
     myLat = pos.coords.latitude;
     myLng = pos.coords.longitude;
@@ -621,8 +635,24 @@ function startGPS() {
     sendLocation(pos.coords);
     updateMapPosition();
   }, err => {
-    setGPSStatus('error: ' + err.message, 'red');
+    setGPSStatus('error — use manual location bar', 'red');
+    toast('GPS blocked (needs HTTPS on mobile). Use the location bar above.', 'error', 6000);
   }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 });
+}
+
+function setManualLocation(latVal, lngVal) {
+  const lat = parseFloat(latVal != null ? latVal : document.getElementById('manualLat').value);
+  const lng = parseFloat(lngVal != null ? lngVal : document.getElementById('manualLng').value);
+  if (isNaN(lat) || isNaN(lng)) { toast('Enter valid lat,lng', 'error'); return; }
+  myLat = lat; myLng = lng;
+  updateGPSDisplay({ latitude: lat, longitude: lng, accuracy: 0, speed: 0, heading: 0 });
+  sendLocation({ latitude: lat, longitude: lng });
+  updateMapPosition();
+  toast('Location set: ' + lat.toFixed(4) + ', ' + lng.toFixed(4), 'success');
+  log('patientLog', 'Manual location set: ' + lat.toFixed(5) + ', ' + lng.toFixed(5), 'type');
+  // Also update the input fields
+  document.getElementById('manualLat').value = lat;
+  document.getElementById('manualLng').value = lng;
 }
 
 function updateGPSDisplay(c) {
@@ -780,13 +810,22 @@ async function sendContactSMS(btn) {
   const name = row.querySelector('.contact-name').value.trim() || 'Contact';
   if (!phone) { toast('Enter phone number', 'error'); return; }
   const loc = myLat ? `${myLat.toFixed(4)}, ${myLng.toFixed(4)}` : 'location pending';
-  try {
-    const r = await fetch(API + '/api/sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, message: `EMERGENCY from ${currentUser.name}: I need help! Location: ${loc}` }) });
-    const d = await r.json();
-    log('patientLog', `SMS to ${name} (${phone}): ${d.status}`, 'type');
-    toast('SMS sent to ' + name + ' (' + d.status + ')', d.status === 'failed' ? 'error' : 'success');
-    pollData();
-  } catch (e) { toast('SMS failed: ' + e.message, 'error'); }
+  const msg = `EMERGENCY from ${currentUser.name}: I need help! Location: ${loc}`;
+  // Log to backend
+  try { await fetch(API + '/api/sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, message: msg }) }); } catch (e) {}
+  // Open native SMS app (works on mobile — real SMS from your phone)
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (isMobile) {
+    window.location.href = 'sms:' + phone + '?body=' + encodeURIComponent(msg);
+    toast('Opening SMS app — press Send', 'success');
+    log('patientLog', `SMS app opened for ${name} (${phone})`, 'type');
+  } else {
+    // Desktop: copy to clipboard and show
+    navigator.clipboard?.writeText(msg);
+    toast('Message copied. Paste into your SMS app and send to ' + phone, 'info', 6000);
+    log('patientLog', `Message copied for ${name} (${phone})`, 'type');
+  }
+  pollData();
 }
 
 function updateIncidentDisplay() {
@@ -963,21 +1002,25 @@ function drawBlockMarkers(blocks) {
 function initPatientMap() {
   patientMap = L.map('map').setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(patientMap);
+  setTimeout(() => patientMap.invalidateSize(), 200);
 }
 
 function initAmbMap() {
   ambMap = L.map('mapAmb').setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(ambMap);
+  setTimeout(() => ambMap.invalidateSize(), 200);
 }
 
 function initHospMap() {
   hospMap = L.map('mapHosp').setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(hospMap);
+  setTimeout(() => hospMap.invalidateSize(), 200);
 }
 
 function initPoliceMap() {
   policeMap = L.map('mapPolice').setView([20.5937, 78.9629], 5);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(policeMap);
+  setTimeout(() => policeMap.invalidateSize(), 200);
   policeMap.on('click', e => {
     document.getElementById('blockLat').value = e.latlng.lat.toFixed(6);
     document.getElementById('blockLng').value = e.latlng.lng.toFixed(6);
@@ -1085,13 +1128,19 @@ async function pollData() {
           pendingDispatch = job;
           document.getElementById('dispatchBanner').classList.remove('hidden');
           document.getElementById('dispatchDetail').textContent = `Patient: ${job.patientName} · Severity: ${job.severity} · Location: ${job.lat.toFixed(4)}, ${job.lng.toFixed(4)} · ETA: ${job.route ? job.route.eta : '…'}`;
+          // Show patient on map immediately
+          if (ambMap && job.lat) {
+            if (!patientMarker2) patientMarker2 = L.circleMarker([job.lat, job.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(ambMap).bindPopup('Patient: ' + job.patientName);
+            else patientMarker2.setLatLng([job.lat, job.lng]);
+          }
         }
         if (job && myAmb.status !== 'busy') { document.getElementById('ambStatus').value = 'busy'; }
       }
-      // Draw routes for active job
-      if (activeJob && activeJob.lat && myLat) {
+      // Draw routes for active job OR pending dispatch
+      const routeTarget = activeJob || pendingDispatch;
+      if (routeTarget && routeTarget.lat && myLat) {
         try {
-          const r4 = await fetch(`${API}/api/route?from=${myLat},${myLng}&to=${activeJob.lat},${activeJob.lng}`);
+          const r4 = await fetch(`${API}/api/route?from=${myLat},${myLng}&to=${routeTarget.lat},${routeTarget.lng}`);
           const route = await r4.json();
           if (route.geometry && ambMap) {
             const latlngs = route.geometry.coordinates.map(c => [c[1], c[0]]);
@@ -1102,9 +1151,14 @@ async function pollData() {
             document.getElementById('routeEta').textContent = route.eta;
             document.getElementById('routeRemain').textContent = route.durationMin;
           }
-          if (!patientMarker2 && activeJob) { patientMarker2 = L.circleMarker([activeJob.lat, activeJob.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(ambMap).bindPopup('Patient'); }
-          else if (patientMarker2) patientMarker2.setLatLng([activeJob.lat, activeJob.lng]);
-        } catch (e) {}
+          if (!patientMarker2 && routeTarget) { patientMarker2 = L.circleMarker([routeTarget.lat, routeTarget.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(ambMap).bindPopup('Patient'); }
+          else if (patientMarker2) patientMarker2.setLatLng([routeTarget.lat, routeTarget.lng]);
+          // Pan map to show route
+          if (myLat && routeTarget.lat) {
+            const bounds = L.latLngBounds([[myLat, myLng], [routeTarget.lat, routeTarget.lng]]);
+            ambMap.fitBounds(bounds.pad(0.2));
+          }
+        } catch (e) { console.error('Route draw error:', e); }
       }
     }
 
@@ -1114,7 +1168,7 @@ async function pollData() {
       const el = document.getElementById('incomingList');
       if (inc.length) {
         el.innerHTML = inc.map(i => `<div class="alert-card"><b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span><p style="font-size:12px;color:#fca5a5;margin-top:4px">ETA: ${i.autoRoute ? i.autoRoute.eta : '…'} · Stage: ${(i.stage||'').replace('_',' ')}</p><p style="font-size:12px;color:#9ca3af">Lat: ${i.lat.toFixed(4)} · Lng: ${i.lng.toFixed(4)}</p></div>`).join('');
-      } else el.innerHTML = '<p style="color:#64748b;font-size:13px">No incoming patients.</p>';
+      } else el.innerHTML = '<p style="color:#64748b;font-size:13px">No incoming patients yet.</p><p style="color:#475569;font-size:12px;margin-top:8px">Patients appear here when:<br>1. You set your location (bar above)<br>2. A patient triggers SOS nearby<br>3. This hospital is assigned as nearest</p>';
       if (inc.length && hospMap && inc[0].lat) {
         if (!patientMarker3) { patientMarker3 = L.circleMarker([inc[0].lat, inc[0].lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(hospMap).bindPopup('Patient'); }
         else patientMarker3.setLatLng([inc[0].lat, inc[0].lng]);

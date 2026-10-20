@@ -200,19 +200,25 @@ app.post('/incidents', async (req, res) => {
 
   if (amb) {
     amb.status = 'busy';
-    // Send SMS to patient contacts
+    // SMS to patient contacts
     if (contacts && contacts.length) {
-      contacts.forEach(c => sendSMS(c.phone, `EMERGENCY: ${patientName} has triggered a panic alert. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`));
+      contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} has triggered a panic alert. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`); });
     }
-    // Send SMS to ambulance driver
-    sendSMS(amb.mobile, `URGENT DISPATCH: Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA to patient: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${sev === 'severe' ? 'ICU-ON-BOARD REQUIRED.' : ''}`);
-    // Send SMS to hospital
-    if (hosp) sendSMS('hospital', `Incoming patient: ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}.`);
+    // SMS to ambulance driver
+    if (amb.mobile && /^\d{10}$/.test(amb.mobile)) sendSMS(amb.mobile, `URGENT DISPATCH: Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA to patient: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${sev === 'severe' ? 'ICU-ON-BOARD REQUIRED.' : ''}`);
+    // SMS to hospital
+    if (hosp) {
+      const hospUser = db.users.find(u => u.hospitalId === hosp.id);
+      if (hospUser && hospUser.mobile && /^\d{10}$/.test(hospUser.mobile)) sendSMS(hospUser.mobile, `Incoming patient: ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}.`);
+    }
   }
 
-  // Notify police
+  // SMS to all registered police
   const smsMsg = `EMERGENCY ALERT: ${patientName} needs help at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName : 'pending'}. Route: ${routeToPatient ? routeToPatient.distanceKm : 'N/A'}.`;
-  sendSMS('911-police-control', smsMsg);
+  db.policeUnits.forEach(pu => {
+    const pUser = db.users.find(u => u.policeId === pu.id);
+    if (pUser && pUser.mobile && /^\d{10}$/.test(pUser.mobile)) sendSMS(pUser.mobile, smsMsg);
+  });
 
   saveDB();
   console.log(`[INCIDENT] ${patientName} severity=${sev} ambulance=${amb ? amb.id : 'none'} hospital=${hosp ? hosp.id : 'none'}`);
@@ -354,7 +360,7 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // ==================== START ====================
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log('========================================');
   console.log('  FIRST RESPONSE SYSTEM RUNNING');
   console.log('  Open: http://localhost:' + PORT);
