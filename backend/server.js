@@ -289,3 +289,12 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Backend running on http://localhost:${PORT}`));
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Kill existing node processes and try again.`);
+  } else {
+    console.error(err);
+  }
+});
+
+app.get('/health', (req, res) => res.json({ ok: true, server: 'first-response-backend', port: PORT }));
