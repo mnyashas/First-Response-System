@@ -102,23 +102,24 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     <div id="login-error" class="error"></div>
     <form onsubmit="event.preventDefault(); loginOrRegister('login');" class="form">
       <label>Name</label>
-      <input id="name" required />
+      <input id="name" />
       <label>Mobile No</label>
-      <input id="mobile" type="tel" required />
+      <input id="mobile" type="tel" />
       <label id="extra-label">Aadhaar Card No</label>
-      <input id="extra" placeholder="Enter Aadhaar" required />
+      <input id="extra" placeholder="Enter Aadhaar" />
       <div id="extra2-row" style="display:none;">
         <label>Address</label>
-        <input id="extra2" required />
+        <input id="extra2" />
       </div>
       <div id="rec-label-row" style="display:none;">
         <label>Receptionist Name</label>
-        <input id="recname" required />
+        <input id="recname" />
       </div>
       <button type="submit">Login</button>
     </form>
-    <p class="note">New user? Register instead:</p>
+    <p class="note">New user? Register first:</p>
     <button onclick="event.preventDefault(); loginOrRegister('register');" class="btn-register">Register</button>
+    <div id="login-success" style="color:#16a34a; font-size:0.85rem; margin-top:0.5rem;"></div>
     <div class="hint">Register first, then login with your credentials.</div>
   </div>
 </div>
@@ -168,26 +169,46 @@ async function api(endpoint, method = 'GET', body = null) {
 
 function loginOrRegister(type) {
   const role = document.getElementById('role').value;
-  const name = document.getElementById('name').value;
-  const mobile = document.getElementById('mobile').value;
-  const extra = document.getElementById('extra').value;
-  const extra2 = document.getElementById('extra2').value;
-  const recname = document.getElementById('recname').value;
+  const name = document.getElementById('name').value.trim();
+  const mobile = document.getElementById('mobile').value.trim();
+  const extra = document.getElementById('extra').value.trim();
+  const extra2 = document.getElementById('extra2').value.trim();
+  const recname = document.getElementById('recname').value.trim();
   const errEl = document.getElementById('login-error');
+  const okEl = document.getElementById('login-success');
   errEl.textContent = '';
+  okEl.textContent = '';
+
+  const isMedical = role === 'patient' || role === 'ambulance';
+
+  if (!name || !mobile) { errEl.textContent = 'Enter Name and Mobile'; return; }
+  if (isMedical && !extra) { errEl.textContent = 'Enter Aadhaar Card No'; return; }
+  if (!isMedical && !extra) { errEl.textContent = 'Enter Institution Name'; return; }
+  if (!isMedical && !extra2) { errEl.textContent = 'Enter Address'; return; }
+  if (!isMedical && !recname) { errEl.textContent = 'Enter Receptionist Name'; return; }
 
   let body = { role, name, mobile };
-  if (role === 'patient' || role === 'ambulance') body.aadhaar = extra;
+  if (isMedical) body.aadhaar = extra;
   else { body.institutionName = extra; body.address = extra2; body.receptionistName = recname; }
 
-  api(`/auth/${type}`, 'POST', body)
+  fetch(API + '/auth/' + type, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+    .then(res => res.json())
     .then(data => {
       if (!data.user) { errEl.textContent = data.error || 'Failed'; return; }
       user = data.user;
       localStorage.setItem('fr_user', JSON.stringify(user));
-      showDashboard();
+      if (type === 'register') {
+        okEl.textContent = 'Registered! Logging in...';
+        setTimeout(() => showDashboard(), 500);
+      } else {
+        showDashboard();
+      }
     })
-    .catch(err => { errEl.textContent = err.message; });
+    .catch(err => { errEl.textContent = 'Cannot reach server. Is backend running? ' + err.message; });
 }
 
 function showDashboard() {
@@ -440,10 +461,10 @@ function toggleEquip(item) {
 }
 
 async function markERReady() {
-  const target = incidents.find(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
+  const target = incidents.find(i => i.assignedHospitalId === user.hospitalId || !i.assignedHospitalId);
   if (!target) return;
   const eq = Object.entries(equipment).filter(([_, v]) => v).map(([k]) => k);
-  await api('/hospitals/er-ready', 'POST', { hospitalId: user.id, incidentId: target.id, equipment: eq });
+  await api('/hospitals/er-ready', 'POST', { hospitalId: user.hospitalId, incidentId: target.id, equipment: eq });
   ready = true;
   renderHospital();
 }

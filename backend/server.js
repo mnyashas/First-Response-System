@@ -7,6 +7,10 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(express.json());
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 const server = http.createServer(app);
