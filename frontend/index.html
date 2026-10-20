@@ -1,9 +1,595 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>First Response System</title>
-  </head>
-  <body><div id="root"></div><script type="module" src="/src/index.jsx"></script></body>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>First Response System</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0f172a; color: #e2e8f0; line-height: 1.5; }
+.app { min-height: 100vh; }
+
+/* Login */
+.login { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #0f172a; }
+.login-card { background: #1e293b; padding: 2.5rem; border-radius: 16px; width: 380px; box-shadow: 0 20px 50px rgba(0,0,0,.4); }
+.login-card h2 { margin-bottom: 1rem; color: #38bdf8; }
+.role-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.role-tabs button { flex: 1; padding: 0.5rem; border: 1px solid #334155; background: transparent; color: #94a3b8; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+.role-tabs button.active { background: #38bdf8; color: #000; border-color: #38bdf8; font-weight: 700; }
+.form { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+.form label { font-size: 0.85rem; color: #94a3b8; }
+.form input { padding: 0.6rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; }
+.form button { padding: 0.75rem; border: none; border-radius: 8px; background: #38bdf8; color: #000; font-weight: 700; cursor: pointer; }
+.btn-register { margin-top: 0.5rem; padding: 0.6rem; border: 1px solid #334155; background: transparent; color: #94a3b8; border-radius: 6px; cursor: pointer; width: 100%; }
+.error { color: #f87171; font-size: 0.85rem; margin-bottom: 0.5rem; }
+.note { margin-top: 1rem; font-size: 0.8rem; color: #64748b; }
+
+/* Dashboards */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.5rem; background: #1e293b; border-bottom: 1px solid #334155; }
+.topbar h1 { font-size: 1.25rem; color: #38bdf8; }
+.user { color: #94a3b8; font-size: 0.9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; padding: 1.5rem; max-width: 1200px; margin: 0 auto; }
+.card { background: #1e293b; border-radius: 12px; padding: 1.25rem; border: 1px solid #334155; }
+.card.big { grid-column: span 2; }
+.card h2 { margin-bottom: 0.75rem; font-size: 1rem; color: #94a3b8; }
+.status-badge { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 20px; font-size: 0.8rem; font-weight: 700; margin-bottom: 0.75rem; }
+.status-badge.alert { background: #7f1d1d; color: #fecaca; border: 1px solid #b91c1c; }
+.status-badge.safe { background: #14532d; color: #bbf7d0; border: 1px solid #15803d; }
+.btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+button { padding: 0.6rem 1rem; border-radius: 8px; border: none; cursor: pointer; font-weight: 600; }
+.btn-panic { background: #dc2626; color: #fff; padding: 0.9rem 1.5rem; font-size: 1rem; flex: 1; }
+.btn-cancel { background: #64748b; color: #fff; flex: 1; }
+.btn-detect { background: #334155; color: #fff; flex: 1; }
+.btn-accept { background: #16a34a; color: #fff; }
+.btn-dismiss { background: #dc2626; color: #fff; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+.hint { font-size: 0.75rem; color: #64748b; margin-top: 0.5rem; }
+.empty { color: #64748b; font-style: italic; font-size: 0.85rem; }
+
+.contact-form { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+.contact-form input { flex: 1; min-width: 90px; }
+.contact-list { list-style: none; max-height: 120px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; background: #0f172a; }
+.contact-list li { padding: 0.4rem 0; border-bottom: 1px solid #334155; font-size: 0.85rem; }
+
+.detection-log { max-height: 140px; overflow-y: auto; border: 1px solid #334155; border-radius: 6px; padding: 0.5rem; background: #0f172a; font-size: 0.8rem; }
+.log-row { padding: 0.3rem 0; border-bottom: 1px solid #1e293b; }
+
+.incident-card .empty { color: #64748b; }
+.dispatch-detail { border: 1px solid #334155; border-radius: 8px; padding: 1rem; background: #0f172a; margin-top: 0.5rem; }
+.route { margin-top: 0.5rem; font-size: 0.85rem; color: #94a3b8; }
+
+.checklist { display: flex; flex-direction: column; gap: 0.4rem; }
+.check-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; }
+.check-item input { width: 16px; height: 16px; }
+
+.patient-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+.patient-card { border: 1px solid #334155; border-radius: 8px; padding: 0.75rem; margin-bottom: 0.5rem; background: #0f172a; }
+.patient-header span { font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px; color: #fff; font-weight: 700; }
+.bg-red { background: #7f1d1d; }
+.bg-yellow { background: #713f12; color: #fcd34d; }
+.bg-green { background: #14532d; color: #bbf7d0; }
+
+.map-mock { position: relative; height: 220px; border: 1px dashed #334155; border-radius: 8px; background: #0f172a; margin-bottom: 0.5rem; }
+.map-label { position: absolute; top: 8px; left: 8px; font-size: 0.75rem; color: #64748b; background: rgba(15,23,42,.7); padding: 2px 6px; border-radius: 4px; }
+.roadblock-marker, .ambulance-marker { position: absolute; width: 160px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 0.4rem; font-size: 0.75rem; color: #fff; pointer-events: none; }
+.roadblock-marker { border-color: #b91c1c; }
+.ambulance-marker { border-color: #16a34a; }
+.rb-dot, .amb-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.rb-dot { background: #b91c1c; box-shadow: 0 0 8px #b91c1c; }
+.amb-dot { background: #16a34a; box-shadow: 0 0 8px #16a34a; }
+.rb-label, .amb-label { font-weight: 700; font-size: 0.7rem; }
+.green-corridor-banner { background: #14532d; color: #bbf7d0; padding: 0.5rem; border-radius: 6px; margin-top: 0.5rem; font-size: 0.85rem; text-align: center; }
+
+.block-form { display: flex; flex-direction: column; gap: 0.5rem; }
+.block-form input { padding: 0.5rem; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; }
+.block-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+.alert-item { padding: 0.5rem 0; border-bottom: 1px solid #1e293b; font-size: 0.85rem; }
+.section { display: none; }
+.section.active { display: block; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const API = 'http://localhost:5000';
+let user = null;
+let socket = null;
+let contacts = [];
+let incidents = [];
+let roadBlocks = [];
+let ambulances = [];
+let hospitals = [];
+let dispatch = null;
+let status = 'available';
+let panicActive = false;
+let countdown = 0;
+let autoDetect = false;
+let detectionLog = [];
+let ready = false;
+let equipment = {};
+let blockReason = '';
+let blockLat = '28.6139';
+let blockLng = '77.2090';
+let corridorActive = false;
+
+const app = document.getElementById('app');
+
+function showSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function loginOrRegister(type) {
+  const role = document.getElementById('role').value;
+  const name = document.getElementById('name').value;
+  const mobile = document.getElementById('mobile').value;
+  const extra = document.getElementById('extra').value;
+  const extra2 = document.getElementById('extra2').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+
+  let body = { role, name, mobile };
+  if (role === 'patient' || role === 'ambulance') body.aadhaar = extra;
+  else { body.institutionName = extra; body.address = extra2; body.receptionistName = name; }
+
+  fetch(`${API}/auth/${type}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (!data.user) { errEl.textContent = data.error || 'Failed'; return; }
+    user = data.user;
+    localStorage.setItem('fr_user', JSON.stringify(user));
+    initSocket();
+    showDashboard();
+  })
+  .catch(err => { errEl.textContent = err.message; });
+}
+
+function showDashboard() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('dashboard-screen').style.display = 'block';
+  document.getElementById('user-info').textContent = `${user.name} · ${user.mobile}`;
+  document.getElementById('user-role').textContent = user.role.toUpperCase();
+
+  const role = user.role;
+  document.getElementById('sec-patient').style.display = role === 'patient' ? 'block' : 'none';
+  document.getElementById('sec-ambulance').style.display = role === 'ambulance' ? 'block' : 'none';
+  document.getElementById('sec-hospital').style.display = role === 'hospital' ? 'block' : 'none';
+  document.getElementById('sec-police').style.display = role === 'police' ? 'block' : 'none';
+
+  if (role === 'patient') loadPatient();
+  if (role === 'ambulance') loadAmbulance();
+  if (role === 'hospital') loadHospital();
+  if (role === 'police') loadPolice();
+}
+
+function initSocket() {
+  socket = new WebSocket(`ws://localhost:5000`);
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type: 'register:' + user.role, userId: user.id }));
+  };
+  socket.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'incident:created' && user.role === 'patient' && msg.data.patientId === user.id) {
+      dispatch = msg.data;
+      renderPatient();
+    }
+    if (msg.type === 'ambulance:dispatch' && user.role === 'ambulance') {
+      dispatch = msg.data;
+      status = 'busy';
+      renderAmbulance();
+    }
+    if (msg.type === 'police:incident' && user.role === 'police') {
+      incidents.unshift(msg.data);
+      renderPolice();
+    }
+  };
+}
+
+// ---------- LOGIN SCREEN ----------
+function renderLogin() {
+  const isMedical = document.getElementById('role').value === 'patient' || document.getElementById('role').value === 'ambulance';
+  const extraLabel = isMedical ? 'Aadhaar Card No' : 'Name of Hospital / Police Unit';
+  const extraPlaceholder = isMedical ? 'Enter Aadhaar' : 'Institution Name';
+  document.getElementById('extra-label').textContent = extraLabel;
+  document.getElementById('extra').placeholder = extraPlaceholder;
+  document.getElementById('extra2-row').style.display = isMedical ? 'none' : 'block';
+  document.getElementById('rec-label-row').style.display = isMedical ? 'none' : 'block';
+}
+
+function toggleRole() {
+  const role = document.getElementById('role').value;
+  document.querySelectorAll('#role-tabs button').forEach(b => b.classList.toggle('active', b.dataset.role === role));
+  renderLogin();
+}
+
+// ---------- PATIENT ----------
+function loadPatient() {
+  renderPatient();
+  setInterval(renderPatient, 3000);
+}
+
+function triggerPanic() {
+  if (panicActive || autoDetect) return;
+  panicActive = true;
+  countdown = 15;
+  document.getElementById('panic-status').textContent = `PANIC ACTIVE - ${countdown}s`;
+  document.getElementById('panic-status').className = 'status-badge alert';
+  const timer = setInterval(() => {
+    countdown--;
+    document.getElementById('panic-status').textContent = `PANIC ACTIVE - ${countdown}s`;
+    if (countdown <= 1) {
+      clearInterval(timer);
+      panicActive = false;
+      sendPanic();
+    }
+  }, 1000);
+}
+
+function cancelPanic() {
+  panicActive = false;
+  autoDetect = false;
+  countdown = 0;
+  document.getElementById('panic-status').textContent = 'Safe';
+  document.getElementById('panic-status').className = 'status-badge safe';
+}
+
+function sendPanic() {
+  const lat = 28.6139 + (Math.random() * 0.01 - 0.005);
+  const lng = 77.2090 + (Math.random() * 0.01 - 0.005);
+  fetch(`${API}/incidents`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patientId: user.id, patientName: user.name, lat, lng, severity: 'normal', contacts })
+  })
+  .then(r => r.json())
+  .then(data => { dispatch = data.incident; renderPatient(); })
+  .catch(err => console.error(err));
+}
+
+function simulateCrash() {
+  if (panicActive || autoDetect) return;
+  autoDetect = true;
+  countdown = 10;
+  document.getElementById('panic-status').textContent = `CRASH DETECTED - ${countdown}s`;
+  document.getElementById('panic-status').className = 'status-badge alert';
+  const impact = Math.random();
+  if (impact > 0.7) {
+    detectionLog.unshift({ time: new Date().toLocaleTimeString(), event: 'Sudden deceleration + impact detected' });
+    const timer = setInterval(() => {
+      countdown--;
+      document.getElementById('panic-status').textContent = `CRASH DETECTED - ${countdown}s`;
+      if (countdown <= 1) {
+        clearInterval(timer);
+        autoDetect = false;
+        sendPanic();
+      }
+    }, 1000);
+  } else {
+    detectionLog.unshift({ time: new Date().toLocaleTimeString(), event: 'Minor vibration - ignored (false-alert prevention)' });
+    setTimeout(() => { autoDetect = false; document.getElementById('panic-status').textContent = 'Safe'; document.getElementById('panic-status').className = 'status-badge safe'; }, 1500);
+  }
+  renderPatient();
+}
+
+function addContact() {
+  const name = document.getElementById('contact-name').value;
+  const phone = document.getElementById('contact-phone').value;
+  const relation = document.getElementById('contact-relation').value;
+  if (!name || !phone) return;
+  contacts.push({ name, phone, relation });
+  document.getElementById('contact-name').value = '';
+  document.getElementById('contact-phone').value = '';
+  document.getElementById('contact-relation').value = '';
+  renderPatient();
+}
+
+function renderPatient() {
+  const isMedical = true;
+  const medicalFields = document.getElementById('patient-medical-fields');
+  medicalFields.style.display = 'block';
+  document.getElementById('patient-content').innerHTML = `
+    <div class="card big">
+      <h2>Emergency Status</h2>
+      <div class="status-badge ${panicActive || autoDetect ? 'alert' : 'safe'}" id="panic-status">
+        ${panicActive ? `PANIC ACTIVE - ${countdown}s` : autoDetect ? `CRASH DETECTED - ${countdown}s` : 'Safe'}
+      </div>
+      <div class="btn-row">
+        <button class="btn-panic" onclick="triggerPanic()" ${panicActive || autoDetect ? 'disabled' : ''}>PANIC BUTTON</button>
+        ${panicActive || autoDetect ? '<button class="btn-cancel" onclick="cancelPanic()">Cancel Alert</button>' : '<button class="btn-detect" onclick="simulateCrash()">Simulate Crash / Fall</button>'}
+      </div>
+      <p class="hint">False-alert prevention: cancel within countdown to abort.</p>
+    </div>
+    <div class="card">
+      <h2>Crash / Fall Detection</h2>
+      <div class="detection-log">
+        ${detectionLog.map(d => `<div class="log-row">${d.time} - ${d.event}</div>`).join('') || '<div class="log-row">Waiting for sensor data...</div>'}
+      </div>
+    </div>
+    <div class="card">
+      <h2>Emergency Contacts</h2>
+      <div class="contact-form">
+        <input id="contact-name" placeholder="Name" />
+        <input id="contact-phone" placeholder="Phone" />
+        <input id="contact-relation" placeholder="Relation" />
+        <button class="btn-accept" onclick="addContact()">Add Contact</button>
+      </div>
+      <ul class="contact-list">
+        ${contacts.map(c => `<li>${c.name} (${c.relation}) - ${c.phone}</li>`).join('') || '<li class="empty">No contacts added.</li>'}
+      </ul>
+      <p class="hint">SMS is sent to all contacts on panic.</p>
+    </div>
+    <div class="card incident-card">
+      <h2>Active Incident</h2>
+      ${dispatch ? `
+        <p>Lat: ${dispatch.lat.toFixed(4)}, Lng: ${dispatch.lng.toFixed(4)}</p>
+        <p>Severity: ${dispatch.severity}</p>
+        <p>Status: ${dispatch.status}</p>
+        ${dispatch.assignedAmbulanceId ? `<p>Ambulance: ${dispatch.assignedAmbulanceId}</p>` : ''}
+        ${dispatch.assignedHospitalId ? `<p>Hospital: ${dispatch.assignedHospitalId}</p>` : ''}
+      ` : '<p class="empty">No active incident.</p>'}
+    </div>
+  `;
+}
+
+// ---------- AMBULANCE ----------
+function loadAmbulance() {
+  fetch(`${API}/ambulances`).then(r => r.json()).then(data => { ambulances = data; renderAmbulance(); });
+  setInterval(() => fetch(`${API}/ambulances`).then(r => r.json()).then(data => { ambulances = data; renderAmbulance(); }), 5000);
+}
+
+function acceptDispatch() {
+  if (!dispatch) return;
+  fetch(`${API}/incidents/${dispatch.id}/severity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ severity: dispatch.severity })
+  }).then(() => { status = 'en_route_patient'; renderAmbulance(); });
+}
+
+function dismissDispatch() {
+  dispatch = null;
+  status = 'available';
+  renderAmbulance();
+}
+
+function patientOnboard() { status = 'en_route_hospital'; renderAmbulance(); }
+function arrivedAtHospital() { status = 'available'; dispatch = null; renderAmbulance(); }
+
+function renderAmbulance() {
+  document.getElementById('ambulance-content').innerHTML = `
+    <div class="card big">
+      <h2>Dispatch Alert</h2>
+      <div class="status-badge">${status.replace('_', ' ').toUpperCase()}</div>
+      ${dispatch ? `
+        <div class="dispatch-detail">
+          <p>${dispatch.severity === 'severe' ? '🚑 ICU-ON-BOARD DISPATCH' : 'PATIENT PANIC ALERT'}</p>
+          <p>Patient at ${dispatch.lat.toFixed(4)}, ${dispatch.lng.toFixed(4)}</p>
+          ${dispatch.route ? `<p>Route to patient: ${dispatch.route.eta}</p>` : ''}
+          ${dispatch.autoRoute ? `<p>Auto-route to nearest hospital: ${dispatch.autoRoute.hospital}<br>ETA: ${dispatch.autoRoute.eta}</p>` : ''}
+          <div class="btn-row">
+            <button class="btn-accept" onclick="acceptDispatch()">Accept Dispatch</button>
+            <button class="btn-dismiss" onclick="dismissDispatch()">Dismiss</button>
+          </div>
+        </div>
+      ` : '<p class="empty">Waiting for dispatch...</p>'}
+      ${status === 'en_route_patient' ? `<div class="btn-row" style="margin-top:1rem"><button class="btn-accept" onclick="patientOnboard()">Patient Onboard</button></div>` : ''}
+      ${status === 'en_route_hospital' ? `<button class="btn-accept" onclick="arrivedAtHospital()">Arrived at Hospital</button>` : ''}
+    </div>
+    <div class="card">
+      <h2>Fleet Status</h2>
+      <ul>
+        ${ambulances.map(a => `<li>${a.driverName} (${a.type.toUpperCase()}) - <span style="color:${a.status==='available'?'#16a34a':'#f87171'}">${a.status}</span></li>`).join('')}
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Nearest Hospital (auto-calculated)</h2>
+      ${dispatch && dispatch.autoRoute ? `<p>${dispatch.autoRoute.hospital}</p><p>ETA: ${dispatch.autoRoute.eta}</p><p>Route auto-reassigns if police mark road blocked.</p>` : '<p class="empty">No active route.</p>'}
+    </div>
+  `;
+}
+
+// ---------- HOSPITAL ----------
+function loadHospital() {
+  setInterval(() => {
+    fetch(`${API}/incidents`).then(r => r.json()).then(data => {
+      incidents = data;
+      renderHospital();
+    });
+  }, 3000);
+  fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderHospital(); });
+}
+
+function markERReady() {
+  const target = incidents.find(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
+  if (!target) return;
+  const eq = Object.entries(equipment).filter(([_, v]) => v).map(([k]) => k);
+  fetch(`${API}/hospitals/er-ready`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hospitalId: user.id, incidentId: target.id, equipment: eq })
+  }).then(() => { ready = true; renderHospital(); });
+}
+
+function toggleEquip(item) {
+  equipment[item] = !equipment[item];
+  renderHospital();
+}
+
+function renderHospital() {
+  const hospIncidents = incidents.filter(i => i.assignedHospitalId === user.id || !i.assignedHospitalId);
+  const equipList = ['Ventilator','Defibrillator','Trauma Bed','Blood Bank','Cardiac Monitor','Oxygen Cylinder'];
+  document.getElementById('hospital-content').innerHTML = `
+    <div class="card big">
+      <h2>ER Ready Status</h2>
+      <div class="status-badge ${ready ? 'safe' : 'alert'}">${ready ? 'ER READY' : 'ER NOT READY'}</div>
+      <h3>Equipment Checklist</h3>
+      <div class="checklist">
+        ${equipList.map(item => `<label class="check-item"><input type="checkbox" ${equipment[item] ? 'checked' : ''} onchange="toggleEquip('${item}')" /> ${item}</label>`).join('')}
+      </div>
+      ${hospIncidents.length > 0 ? `<button class="btn-accept" onclick="markERReady()" ${ready ? 'disabled' : ''}>Mark ER Ready & Notify</button>` : '<p class="empty">No incoming patients.</p>'}
+      ${ready ? '<p class="hint">ER team and equipment alerted.</p>' : ''}
+    </div>
+    <div class="card">
+      <h2>Incoming Patients</h2>
+      ${hospIncidents.length === 0 ? '<p class="empty">No incoming patients.</p>' : hospIncidents.map(inc => `
+        <div class="patient-card">
+          <div class="patient-header"><strong>${inc.patientName}</strong><span class="${inc.severity==='severe'?'bg-red':inc.severity==='normal'?'bg-yellow':'bg-green'}">${inc.severity.toUpperCase()}</span></div>
+          <p>Aadhaar-linked: ${inc.patientId}</p>
+          <p>${inc.createdAt.slice(11,16)}</p>
+          ${inc.route ? `<p>Ambulance ETA: ${inc.route.eta}</p>` : ''}
+          <div class="btn-row" style="margin-top:0.5rem">
+            <button class="btn-accept" onclick="alert('Preparing for ${inc.patientName}')">Accept</button>
+            <button class="btn-dismiss" onclick="alert('Redirecting ${inc.patientName}')">Reject / Redirect</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="card">
+      <h2>Hospital Profile</h2>
+      <p>${user.institutionName}</p>
+      <p>Address: ${user.address}</p>
+      <p>Receptionist: ${user.receptionistName}</p>
+    </div>
+  `;
+}
+
+// ---------- POLICE ----------
+function loadPolice() {
+  setInterval(() => {
+    fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderPolice(); });
+    fetch(`${API}/police/roadblocks`).then(r => r.json()).then(data => { roadBlocks = data; renderPolice(); });
+  }, 3000);
+  fetch(`${API}/incidents`).then(r => r.json()).then(data => { incidents = data; renderPolice(); });
+  fetch(`${API}/police/roadblocks`).then(r => r.json()).then(data => { roadBlocks = data; renderPolice(); });
+}
+
+function addRoadBlock() {
+  const reason = document.getElementById('block-reason').value;
+  const lat = parseFloat(document.getElementById('block-lat').value);
+  const lng = parseFloat(document.getElementById('block-lng').value);
+  fetch(`${API}/police/roadblock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason, lat, lng, createdBy: user.name })
+  }).then(() => { document.getElementById('block-reason').value = ''; renderPolice(); });
+}
+
+function clearBlock(id) {
+  fetch(`${API}/police/roadblock/${id}/clear`, { method: 'POST' }).then(renderPolice);
+}
+
+function activateGreenCorridor() {
+  const inc = incidents.find(i => i.status === 'assigned');
+  if (!inc) return;
+  fetch(`${API}/police/greencorridor`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ incidentId: inc.id })
+  }).then(() => { corridorActive = true; renderPolice(); });
+}
+
+function renderPolice() {
+  const assigned = incidents.filter(i => i.status === 'assigned');
+  const activeBlocks = roadBlocks.filter(b => b.active);
+  document.getElementById('police-content').innerHTML = `
+    <div class="card big">
+      <h2>Ambulance Route & Traffic</h2>
+      <div class="map-mock">
+        <div class="map-label">Live Map - Ambulance routes & road blocks</div>
+        ${activeBlocks.map((b, i) => `
+          <div class="roadblock-marker" style="top:${20 + i*60}px; left:20px;"><div class="rb-dot"></div><div class="rb-label">${b.reason}</div></div>
+        `).join('')}
+        ${assigned.map((inc, i) => `
+          <div class="ambulance-marker" style="top:${20 + i*50}px; left:180px;"><div class="amb-dot"></div><div class="amb-label">Ambulance ${inc.assignedAmbulanceId}</div></div>
+        `).join('')}
+      </div>
+      ${corridorActive ? '<div class="green-corridor-banner">🚦 GREEN CORRIDOR ACTIVATED - Traffic signals cleared</div>' : ''}
+    </div>
+    <div class="card">
+      <h2>Mark Road Blocked (VIP / Traffic)</h2>
+      <div class="block-form">
+        <input id="block-reason" placeholder="Reason (e.g. VIP movement)" />
+        <input id="block-lat" placeholder="Latitude" value="28.6139" />
+        <input id="block-lng" placeholder="Longitude" value="77.2090" />
+        <button class="btn-accept" onclick="addRoadBlock()">Add Road Block</button>
+      </div>
+      <p class="hint">Adding a block auto-reassigns affected ambulance routes.</p>
+      <button class="btn-accept" onclick="activateGreenCorridor()">Activate Green Corridor</button>
+    </div>
+    <div class="card">
+      <h2>Active Road Blocks</h2>
+      ${activeBlocks.length === 0 ? '<p class="empty">No active blocks.</p>' : activeBlocks.map(b => `
+        <div class="block-item"><span>${b.reason}</span><button class="btn-dismiss" onclick="clearBlock('${b.id}')">Clear</button></div>
+      `).join('')}
+    </div>
+    <div class="card">
+      <h2>Accident Alerts</h2>
+      ${incidents.length === 0 ? '<p class="empty">No alerts.</p>' : incidents.slice(0,5).map(inc => `
+        <div class="alert-item">
+          <p>${inc.patientName} - ${inc.severity}</p>
+          <p>${inc.status}</p>
+          <p>${inc.createdAt.slice(11,16)}</p>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ---------- INIT ----------
+renderLogin();
+
+</script>
+
+<div id="login-screen" class="login">
+  <div class="login-card">
+    <div class="role-tabs" id="role-tabs">
+      <button data-role="patient" class="active" onclick="toggleRole()">Patient</button>
+      <button data-role="ambulance" onclick="toggleRole()">Ambulance</button>
+      <button data-role="hospital" onclick="toggleRole()">Hospital</button>
+      <button data-role="police" onclick="toggleRole()">Police</button>
+    </div>
+    <h2 id="login-title">Patient / Ambulance Login</h2>
+    <div id="login-error" class="error"></div>
+    <form onsubmit="event.preventDefault(); loginOrRegister('login');" class="form">
+      <label>Name</label>
+      <input id="name" required />
+      <label>Mobile No</label>
+      <input id="mobile" type="tel" required />
+      <label id="extra-label">Aadhaar Card No</label>
+      <input id="extra" placeholder="Enter Aadhaar" required />
+      <div id="extra2-row" style="display:none;">
+        <label>Address</label>
+        <input id="extra2" required />
+      </div>
+      <div id="rec-label-row" style="display:none;">
+        <label>Receptionist Name</label>
+        <input id="name" required />
+      </div>
+      <button type="submit">Login</button>
+    </form>
+    <p className="note">New user? Register instead:</p>
+    <button onclick="event.preventDefault(); loginOrRegister('register');" class="btn-register">Register</button>
+    <div class="hint">Demo: Patient mobile 9876543210 · Ambulance 9988776655 · Hospital/Police any</div>
+  </div>
+</div>
+
+<div id="dashboard-screen" style="display:none;">
+  <div class="topbar">
+    <h1 id="user-role">PATIENT</h1>
+    <div id="user-info">User · Mobile</div>
+    <button onclick="localStorage.clear(); location.reload()">Logout</button>
+  </div>
+  <div class="grid">
+    <div id="sec-patient" class="section" style="display:none;"><div id="patient-medical-fields" style="display:none;"></div><div id="patient-content"></div></div>
+    <div id="sec-ambulance" class="section" style="display:none;"><div id="ambulance-content"></div></div>
+    <div id="sec-hospital" class="section" style="display:none;"><div id="hospital-content"></div></div>
+    <div id="sec-police" class="section" style="display:none;"><div id="police-content"></div></div>
+  </div>
+</div>
+</body>
 </html>
