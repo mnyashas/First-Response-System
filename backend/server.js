@@ -7,243 +7,362 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(express.json());
-app.use((req, res, next) => {
-  res.set('Cache-Control', 'no-store');
-  next();
-});
-app.use(express.static(path.join(__dirname, '../frontend')));
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+// ==================== PERSISTENCE ====================
+const DATA_FILE = path.join(__dirname, 'data.json');
+let db = { users: [], ambulances: [], hospitals: [], policeUnits: [], incidents: [], roadBlocks: [], greenCorridors: [], smsLog: [] };
 
-// -------------------- In-memory stores --------------------
-const users = [];
-const ambulances = [];
-const hospitals = [];
-const policeUnits = [];
-const incidents = [];
-const emergencyContacts = {};
-const roadBlocks = [];
-const greenCorridors = [];
-
-function seed() {
-  // No demo data — user registers fresh
+function loadDB() {
+  try { if (fs.existsSync(DATA_FILE)) db = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch (e) { console.error('DB load error:', e.message); }
 }
-seed();
+function saveDB() { try { fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2)); } catch (e) { console.error('DB save error:', e.message); }
+}
+loadDB();
 
-function haverside(lat1, lon1, lat2, lon2) {
+// ==================== HELPERS ====================
+function haversine(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function nearestAmbulance(lat, lng, preferICU = false) {
-  let c = ambulances.filter(a => a.status === 'available');
-  if (preferICU) c = c.filter(a => a.type === 'icu');
-  if (c.length === 0) c = ambulances.filter(a => a.status === 'available');
-  c.sort((a, b) => haverside(lat, lng, a.lat, a.lng) - haverside(lat, lng, b.lat, b.lng));
+function nearestAmbulance(lat, lng, preferICU) {
+  let c = db.ambulances.filter(a => a.status === 'available' && a.lat != null);
+  if (preferICU) { const icu = c.filter(a => a.type === 'icu'); if (icu.length) c = icu; }
+  c.sort((a, b) => haversine(lat, lng, a.lat, a.lng) - haversine(lat, lng, b.lat, b.lng));
   return c[0] || null;
 }
 
 function nearestHospital(lat, lng) {
-  return [...hospitals].sort((a, b) => haverside(lat, lng, a.lat, a.lng) - haverside(lat, lng, b.lat, b.lng))[0] || null;
+  const h = db.hospitals.filter(x => x.lat != null);
+  h.sort((a, b) => haversine(lat, lng, a.lat, a.lng) - haversine(lat, lng, b.lat, b.lng));
+  return h[0] || null;
 }
 
 function isBlocked(lat, lng) {
-  return roadBlocks.some(b => b.active && haverside(lat, lng, b.lat, b.lng) <= (b.radius || 1));
+  return db.roadBlocks.some(b => b.active && haversine(lat, lng, b.lat, b.lng) <= (b.radius || 1));
 }
 
-// ---------- Auth ----------
+// ==================== OSRM ROUTE ====================
+const routeCache = {};
+async function getRoute(fromLat, fromLng, toLat, toLng) {
+  const key = `${fromLat},${fromLng};${toLat},${toLng}`;
+  if (routeCache[key]) return routeCache[key];
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${fromLng},${fromLat};${toLng},${toLat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.routes && data.routes.length > 0) {
+      const r = data.routes[0];
+      const route = {
+        geometry: r.geometry,
+        distance: r.distance,
+        duration: r.duration,
+        distanceKm: (r.distance / 1000).toFixed(1) + ' km',
+        durationMin: Math.round(r.duration / 60) + ' min',
+        eta: Math.round(r.duration / 60) + ' min'
+      };
+      routeCache[key] = route;
+      return route;
+    }
+  } catch (e) { console.error('OSRM error:', e.message); }
+  // Fallback: straight-line estimate
+  const dist = haversine(fromLat, fromLng, toLat, toLng);
+  return { geometry: null, distance: dist * 1000, duration: dist * 4 * 60, distanceKm: dist.toFixed(1) + ' km', durationMin: Math.round(dist * 4) + ' min', eta: Math.round(dist * 4) + ' min', fallback: true };
+}
+
+// ==================== SMS ====================
+// Real SMS: set env vars TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM to send real SMS via Twilio.
+// Without them, messages are logged in demo mode (visible in patient SMS log UI).
+async function sendSMS(phone, message) {
+  const entry = { id: uuidv4(), phone, message, timestamp: new Date().toISOString(), status: 'demo' };
+  const sid = process.env.TWILIO_SID, token = process.env.TWILIO_TOKEN, from = process.env.TWILIO_FROM;
+  if (sid && token && from) {
+    try {
+      const auth = Buffer.from(sid + ':' + token).toString('base64');
+      const params = new URLSearchParams({ To: phone.startsWith('+') ? phone : '+91' + phone, From: from, Body: message });
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: 'POST', headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' }, body: params
+      });
+      const data = await res.json();
+      entry.status = res.ok ? 'sent' : 'failed';
+      entry.provider = 'twilio';
+      if (data.error_message) entry.error = data.error_message;
+      console.log(`[SMS:twilio:${entry.status}] -> ${phone}`);
+    } catch (e) {
+      entry.status = 'failed'; entry.error = e.message;
+      console.log(`[SMS:twilio:error] ${e.message}`);
+    }
+  } else {
+    // Demo mode — message is logged and shown in the SMS log UI
+    console.log(`[SMS:demo] -> ${phone}: ${message}`);
+  }
+  db.smsLog.push(entry);
+  if (db.smsLog.length > 200) db.smsLog = db.smsLog.slice(-200);
+  saveDB();
+  return entry;
+}
+
+// ==================== AUTH ====================
 app.post('/auth/register', (req, res) => {
   const { role, name, mobile, aadhaar, institutionName, address, receptionistName } = req.body;
-  console.log('REGISTER body:', req.body);
-  if (!role || !name || !mobile) return res.status(400).json({ error: 'Missing fields: role, name, mobile required' });
-  if (role === 'hospital' || role === 'police') {
-    if (!institutionName || !address || !receptionistName) return res.status(400).json({ error: 'Hospital/Police: institution name, address, and receptionist name are all required' });
-  }
-  if (role === 'patient' || role === 'ambulance') {
-    if (!aadhaar) return res.status(400).json({ error: 'Aadhaar Card No is required' });
-  }
+  const isInst = role === 'hospital' || role === 'police';
+  const displayName = institutionName || name;
+  if (!role || !mobile) return res.status(400).json({ error: 'Mobile required' });
+  if (!displayName) return res.status(400).json({ error: isInst ? 'Institution Name required' : 'Name required' });
+  if ((role === 'patient' || role === 'ambulance') && !aadhaar) return res.status(400).json({ error: 'Aadhaar Card No required' });
+  if (isInst && (!address || !receptionistName)) return res.status(400).json({ error: 'Address and receptionist name required' });
+  if (db.users.find(u => u.role === role && u.mobile === mobile)) return res.status(400).json({ error: 'Mobile already registered for this role. Try Login.' });
+
   const id = uuidv4();
-  const user = { id, role, name, mobile, ...(aadhaar ? { aadhaar } : {}), ...(role === 'hospital' || role === 'police' ? { institutionName, address, receptionistName } : {}), createdAt: new Date().toISOString() };
-  users.push(user);
-  // Add to role-specific arrays and store internal id on user
+  const user = { id, role, name: displayName, mobile, createdAt: new Date().toISOString() };
+  if (aadhaar) user.aadhaar = aadhaar;
+  if (institutionName) { user.institutionName = institutionName; user.address = address; user.receptionistName = receptionistName; }
+  db.users.push(user);
+
   if (role === 'ambulance') {
     const ambId = 'amb-' + id;
-    ambulances.push({ id: ambId, userId: id, driverName: name, mobile, status: 'available', lat: 28.6139, lng: 77.2090, type: 'normal', socketId: null });
+    db.ambulances.push({ id: ambId, userId: id, driverName: name, mobile, status: 'available', lat: null, lng: null, type: 'normal', heading: 0, speed: 0, lastUpdate: null, socketId: null });
     user.ambulanceId = ambId;
   }
   if (role === 'hospital') {
     const hospId = 'h-' + id;
-    hospitals.push({ id: hospId, userId: id, name, address, receptionistName, lat: 28.6150, lng: 77.2050, equipment: [] });
+    db.hospitals.push({ id: hospId, userId: id, name: institutionName, address, receptionistName, lat: null, lng: null, equipment: [] });
     user.hospitalId = hospId;
   }
   if (role === 'police') {
     const policeId = 'p-' + id;
-    policeUnits.push({ id: policeId, userId: id, name, address, receptionistName, socketId: null });
+    db.policeUnits.push({ id: policeId, userId: id, name: institutionName, address, receptionistName, socketId: null });
     user.policeId = policeId;
   }
-  res.json({ user, token: `mock-${id}` });
+  saveDB();
+  console.log(`[REGISTER] ${role}: ${name} (${mobile})`);
+  res.json({ user, token: 'mock-' + id });
 });
 
 app.post('/auth/login', (req, res) => {
   const { role, mobile } = req.body;
-  console.log('LOGIN body:', req.body);
-  const user = users.find(u => u.role === role && u.mobile === mobile);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials - register first' });
-  res.json({ user, token: `mock-${user.id}` });
+  const user = db.users.find(u => u.role === role && u.mobile === mobile);
+  if (!user) return res.status(401).json({ error: 'No account found for this role and mobile. Register first.' });
+  res.json({ user, token: 'mock-' + user.id });
 });
 
-// ---------- Ambulance ----------
-app.post('/ambulances/location', (req, res) => {
-  const { userId, lat, lng } = req.body;
-  const amb = ambulances.find(a => a.userId === userId);
-  if (!amb) return res.status(404).json({ error: 'Not found' });
-  amb.lat = lat; amb.lng = lng;
-  io.emit('ambulance:updated', amb);
-  res.json(amb);
+// ==================== LOCATION ====================
+app.post('/location', (req, res) => {
+  const { userId, lat, lng, heading, speed, accuracy } = req.body;
+  if (lat == null || lng == null) return res.status(400).json({ error: 'lat and lng required' });
+  const amb = db.ambulances.find(a => a.userId === userId);
+  if (amb) {
+    amb.lat = lat; amb.lng = lng; amb.heading = heading || 0; amb.speed = speed || 0; amb.lastUpdate = new Date().toISOString();
+    saveDB();
+    io.emit('location:update', { id: amb.id, lat, lng, heading, speed, status: amb.status });
+    return res.json({ ok: true, ambulance: amb });
+  }
+  const hosp = db.hospitals.find(h => h.userId === userId);
+  if (hosp) { hosp.lat = lat; hosp.lng = lng; saveDB(); return res.json({ ok: true, hospital: hosp }); }
+  res.status(404).json({ error: 'User not found as ambulance or hospital' });
 });
 
-app.get('/ambulances', (req, res) => res.json(ambulances));
+app.get('/ambulances', (req, res) => res.json(db.ambulances));
 
-// ---------- Incidents ----------
-app.post('/incidents', (req, res) => {
-  const { patientId, patientName, lat, lng, severity = 'normal', contacts = [] } = req.body;
+// ==================== INCIDENTS ====================
+app.post('/incidents', async (req, res) => {
+  const { patientId, patientName, lat, lng, severity, contacts, accuracy } = req.body;
+  if (lat == null || lng == null) return res.status(400).json({ error: 'Location required (lat, lng)' });
+
   const id = uuidv4();
-  const useICU = severity === 'severe';
+  const sev = severity || 'normal';
+  const useICU = sev === 'severe';
   const amb = nearestAmbulance(lat, lng, useICU);
   const hosp = nearestHospital(lat, lng);
 
+  // Calculate real routes
+  let routeToPatient = null, routeToHospital = null;
+  if (amb && amb.lat != null) {
+    routeToPatient = await getRoute(amb.lat, amb.lng, lat, lng);
+  }
+  if (hosp && hosp.lat != null) {
+    routeToHospital = await getRoute(lat, lng, hosp.lat, hosp.lng);
+  }
+
   const incident = {
-    id, patientId, patientName, lat, lng, severity,
+    id, patientId, patientName, lat, lng, accuracy: accuracy || null, severity: sev,
     status: amb ? 'assigned' : 'pending',
     assignedAmbulanceId: amb ? amb.id : null,
     assignedHospitalId: hosp ? hosp.id : null,
-    route: null,
-    autoRoute: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    route: routeToPatient, autoRoute: routeToHospital,
+    stage: amb ? 'dispatched' : 'waiting',
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
   };
-  incidents.push(incident);
+  db.incidents.push(incident);
 
   if (amb) {
     amb.status = 'busy';
-    incident.route = { from: { lat: amb.lat, lng: amb.lng }, to: { lat, lng }, eta: Math.round(haverside(amb.lat, amb.lng, lat, lng) * 4) + ' min' };
-    incident.autoRoute = { from: { lat, lng }, to: { lat: hosp.lat, lng: hosp.lng }, hospital: hosp.name, eta: Math.round(haverside(lat, lng, hosp.lat, hosp.lng) * 4) + ' min' };
+    // Send SMS to patient contacts
+    if (contacts && contacts.length) {
+      contacts.forEach(c => sendSMS(c.phone, `EMERGENCY: ${patientName} has triggered a panic alert. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`));
+    }
+    // Send SMS to ambulance driver
+    sendSMS(amb.mobile, `URGENT DISPATCH: Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA to patient: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${sev === 'severe' ? 'ICU-ON-BOARD REQUIRED.' : ''}`);
+    // Send SMS to hospital
+    if (hosp) sendSMS('hospital', `Incoming patient: ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}.`);
   }
 
-  if (amb && amb.socketId) io.to(amb.socketId).emit('ambulance:dispatch', incident);
-  policeUnits.forEach(p => { if (p.socketId) io.to(p.socketId).emit('police:incident', incident); });
+  // Notify police
+  const smsMsg = `EMERGENCY ALERT: ${patientName} needs help at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName : 'pending'}. Route: ${routeToPatient ? routeToPatient.distanceKm : 'N/A'}.`;
+  sendSMS('911-police-control', smsMsg);
+
+  saveDB();
+  console.log(`[INCIDENT] ${patientName} severity=${sev} ambulance=${amb ? amb.id : 'none'} hospital=${hosp ? hosp.id : 'none'}`);
   io.emit('incident:created', incident);
-
-  contacts.forEach(c => console.log(`[SMS] PANIC to ${c.name} (${c.phone}): ${patientName} at ${lat}, ${lng}`));
-
   res.json({ incident, ambulance: amb, hospital: hosp });
 });
 
+app.get('/incidents', (req, res) => res.json(db.incidents));
+
 app.post('/incidents/:id/severity', (req, res) => {
-  const { id } = req.params;
-  const { severity } = req.body;
-  const inc = incidents.find(i => i.id === id);
+  const inc = db.incidents.find(i => i.id === req.params.id);
   if (!inc) return res.status(404).json({ error: 'Not found' });
-  inc.severity = severity;
+  inc.severity = req.body.severity;
   inc.updatedAt = new Date().toISOString();
-  if (severity === 'severe' && inc.assignedAmbulanceId) {
-    const amb = ambulances.find(a => a.id === inc.assignedAmbulanceId);
+  if (inc.severity === 'severe' && inc.assignedAmbulanceId) {
+    const amb = db.ambulances.find(a => a.id === inc.assignedAmbulanceId);
     if (amb && amb.type !== 'icu') {
       const icu = nearestAmbulance(inc.lat, inc.lng, true);
-      if (icu) {
-        amb.status = 'available';
-        inc.assignedAmbulanceId = icu.id;
-        icu.status = 'busy';
-        io.to(icu.socketId).emit('ambulance:dispatch', { ...inc, severity: 'severe', note: 'ICU upgrade' });
-      }
+      if (icu) { amb.status = 'available'; inc.assignedAmbulanceId = icu.id; icu.status = 'busy'; io.to(icu.socketId).emit('ambulance:dispatch', inc); }
     }
   }
   io.emit('incident:updated', inc);
+  saveDB();
   res.json(inc);
 });
 
-app.get('/incidents', (req, res) => res.json(incidents));
-
-// ---------- Road blocks ----------
-app.post('/police/roadblock', (req, res) => {
-  const { reason, lat, lng, radius = 1, createdBy } = req.body;
-  const block = { id: uuidv4(), reason, lat, lng, radius, active: true, createdBy, createdAt: new Date().toISOString() };
-  roadBlocks.push(block);
-  io.emit('police:roadblock', block);
-  incidents.forEach(inc => {
-    if (inc.status === 'assigned' && inc.route && isBlocked(inc.lat, inc.lng)) {
-      const amb = ambulances.find(a => a.id === inc.assignedAmbulanceId);
-      const newAmb = nearestAmbulance(inc.lat, inc.lng, inc.severity === 'severe');
-      if (newAmb && newAmb.id !== inc.assignedAmbulanceId) {
-        if (amb) amb.status = 'available';
-        inc.assignedAmbulanceId = newAmb.id;
-        newAmb.status = 'busy';
-        inc.route = { from: { lat: newAmb.lat, lng: newAmb.lng }, to: { lat: inc.lat, lng: inc.lng }, eta: Math.round(haverside(newAmb.lat, newAmb.lng, inc.lat, inc.lng) * 4) + ' min' };
-        io.to(newAmb.socketId).emit('ambulance:dispatch', inc);
-        io.emit('incident:updated', inc);
-      }
-    }
-  });
-  res.json({ block, message: 'Road blocked. Routes reassigned.' });
+app.post('/incidents/:id/status', (req, res) => {
+  const inc = db.incidents.find(i => i.id === req.params.id);
+  if (!inc) return res.status(404).json({ error: 'Not found' });
+  inc.status = req.body.status;
+  inc.stage = req.body.stage || inc.stage;
+  inc.updatedAt = new Date().toISOString();
+  io.emit('incident:updated', inc);
+  saveDB();
+  res.json(inc);
 });
 
+// ==================== ROAD BLOCKS ====================
+app.post('/police/roadblock', async (req, res) => {
+  const { reason, lat, lng, radius, createdBy } = req.body;
+  if (!reason || lat == null || lng == null) return res.status(400).json({ error: 'Reason and coordinates required' });
+  const block = { id: uuidv4(), reason, lat, lng, radius: radius || 1, active: true, createdBy, createdAt: new Date().toISOString() };
+  db.roadBlocks.push(block);
+  io.emit('police:roadblock', block);
+
+  // Reassign affected incidents
+  for (const inc of db.incidents) {
+    if (inc.status === 'assigned' && inc.route && isBlocked(inc.lat, inc.lng)) {
+      const oldAmb = db.ambulances.find(a => a.id === inc.assignedAmbulanceId);
+      const newAmb = nearestAmbulance(inc.lat, inc.lng, inc.severity === 'severe');
+      if (newAmb && newAmb.id !== inc.assignedAmbulanceId) {
+        if (oldAmb) oldAmb.status = 'available';
+        inc.assignedAmbulanceId = newAmb.id;
+        newAmb.status = 'busy';
+        inc.route = await getRoute(newAmb.lat, newAmb.lng, inc.lat, inc.lng);
+        io.to(newAmb.socketId).emit('ambulance:dispatch', inc);
+        io.emit('incident:updated', inc);
+        sendSMS(newAmb.mobile, `ROUTE CHANGE: Road blocked (${reason}). You are now assigned to patient ${inc.patientName} at ${inc.lat.toFixed(4)}, ${inc.lng.toFixed(4)}. ETA: ${inc.route.eta}.`);
+      }
+    }
+  }
+  saveDB();
+  res.json({ block, message: 'Road blocked. Affected routes reassigned.' });
+});
+
+app.get('/police/roadblocks', (req, res) => res.json(db.roadBlocks));
 app.post('/police/roadblock/:id/clear', (req, res) => {
-  const block = roadBlocks.find(b => b.id === req.params.id);
+  const block = db.roadBlocks.find(b => b.id === req.params.id);
   if (!block) return res.status(404).json({ error: 'Not found' });
   block.active = false;
   io.emit('police:roadblock-cleared', block);
+  saveDB();
   res.json(block);
 });
 
-app.get('/police/roadblocks', (req, res) => res.json(roadBlocks));
-
 app.post('/police/greencorridor', (req, res) => {
-  const { incidentId } = req.body;
-  greenCorridors.push({ id: uuidv4(), incidentId, active: true, createdAt: new Date().toISOString() });
-  io.emit('police:greencorridor', greenCorridors[greenCorridors.length - 1]);
-  res.json({ ok: true });
+  const corridor = { id: uuidv4(), incidentId: req.body.incidentId, active: true, createdAt: new Date().toISOString() };
+  db.greenCorridors.push(corridor);
+  io.emit('police:greencorridor', corridor);
+  saveDB();
+  res.json(corridor);
 });
 
-// ---------- Hospital ----------
+// ==================== HOSPITAL ====================
 app.post('/hospitals/er-ready', (req, res) => {
-  const { hospitalId, incidentId, equipment = [] } = req.body;
-  const inc = incidents.find(i => i.id === incidentId);
-  if (inc) inc.hospitalPrep = { hospitalId, equipment, readyAt: new Date().toISOString() };
+  const { hospitalId, incidentId, equipment } = req.body;
+  const inc = db.incidents.find(i => i.id === incidentId);
+  if (inc) { inc.hospitalPrep = { hospitalId, equipment, readyAt: new Date().toISOString() }; saveDB(); }
   io.emit('hospital:er-ready', { incidentId, hospitalId, equipment });
   res.json({ ok: true });
 });
 
-app.get('/hospitals', (req, res) => res.json(hospitals));
+app.get('/hospitals', (req, res) => res.json(db.hospitals));
+app.get('/sms-log', (req, res) => res.json(db.smsLog.slice(-20)));
 
-// ---------- Serve frontend ----------
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/index.html'));
+// ==================== ROUTE + SMS API ====================
+app.post('/api/sms', async (req, res) => {
+  const { phone, message } = req.body;
+  if (!phone || !message) return res.status(400).json({ error: 'phone and message required' });
+  const entry = await sendSMS(phone, message);
+  res.json(entry);
 });
 
-// ---------- Socket.io ----------
+app.get('/api/route', async (req, res) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: 'from and to required (lat,lng)' });
+  const [fLat, fLng] = from.split(',').map(Number);
+  const [tLat, tLng] = to.split(',').map(Number);
+  const route = await getRoute(fLat, fLng, tLat, tLng);
+  res.json(route);
+});
+
+// ==================== SOCKET.IO ====================
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
 io.on('connection', (socket) => {
+  console.log('[WS] Connected:', socket.id);
   socket.on('register:ambulance', (userId) => {
-    const amb = ambulances.find(a => a.userId === userId);
-    if (amb) { amb.socketId = socket.id; socket.join(`ambulance-${amb.id}`); }
+    const amb = db.ambulances.find(a => a.userId === userId);
+    if (amb) { amb.socketId = socket.id; saveDB(); }
   });
   socket.on('register:police', (userId) => {
-    const p = policeUnits.find(p => p.userId === userId);
-    if (p) { p.socketId = socket.id; socket.join('police'); }
+    const p = db.policeUnits.find(p => p.userId === userId);
+    if (p) { p.socketId = socket.id; saveDB(); }
   });
-  socket.on('ambulance:status', ({ ambulanceId, status }) => {
-    const amb = ambulances.find(a => a.id === ambulanceId);
-    if (amb) { amb.status = status; io.emit('ambulance:updated', amb); }
+  socket.on('location:update', (data) => {
+    const amb = db.ambulances.find(a => a.userId === data.userId);
+    if (amb) { amb.lat = data.lat; amb.lng = data.lng; amb.heading = data.heading || 0; amb.speed = data.speed || 0; amb.lastUpdate = new Date().toISOString(); saveDB(); io.emit('location:update', { id: amb.id, lat: amb.lat, lng: amb.lng, heading: amb.heading, speed: amb.speed, status: amb.status }); }
   });
   socket.on('disconnect', () => {
-    ambulances.forEach(a => { if (a.socketId === socket.id) a.socketId = null; });
-    policeUnits.forEach(p => { if (p.socketId === socket.id) p.socketId = null; });
+    db.ambulances.forEach(a => { if (a.socketId === socket.id) a.socketId = null; });
+    db.policeUnits.forEach(p => { if (p.socketId === socket.id) p.socketId = null; });
+    saveDB();
   });
 });
 
+// ==================== SERVE FRONTEND ====================
+app.use(express.static(path.join(__dirname, '../frontend')));
+
+// ==================== START ====================
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`\n========================================\n  FIRST RESPONSE SYSTEM RUNNING\n========================================\n  Open: http://localhost:${PORT}\n========================================\n`));
+server.listen(PORT, () => {
+  console.log('========================================');
+  console.log('  FIRST RESPONSE SYSTEM RUNNING');
+  console.log('  Open: http://localhost:' + PORT);
+  console.log('========================================');
+  console.log('  Data persisted to: data.json');
+  console.log('  Routes: OSRM (real road routing)');
+  console.log('  SMS: Textbelt API (1 free/day)');
+  console.log('  GPS: Browser Geolocation API');
+  console.log('  Crash: DeviceMotion API');
+  console.log('========================================');
+});
