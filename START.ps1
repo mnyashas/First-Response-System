@@ -41,11 +41,12 @@ Set-Content -Path $batPath -Value $bat
 Start-Process -FilePath $batPath -WindowStyle Hidden
 
 Write-Host "  Waiting for tunnel..." -ForegroundColor Yellow
-Start-Sleep -Seconds 15
+Start-Sleep -Seconds 18
 
 $tunnelUrl = ''
 if (Test-Path $urlFile) {
-    $tunnelUrl = (Get-Content $urlFile | Select-String 'https://[a-z-]+\.trycloudflare\.com').Matches[0].Value
+    $m = Get-Content $urlFile -ErrorAction SilentlyContinue | Select-String 'https://[a-z0-9-]+\.trycloudflare\.com' | Select-Object -First 1
+    if ($m) { $tunnelUrl = [regex]::Match($m.ToString(), 'https://[a-z0-9-]+\.trycloudflare\.com').Value }
 }
 
 Write-Host ""
