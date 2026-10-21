@@ -287,14 +287,17 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>📱 Emergency Contacts (SMS)</h2>
+      <h2>📱 Emergency Contacts</h2>
+      <div id="smsProviderBanner" style="background:#78350f;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#fcd34d">
+        ⚠️ SMS: Demo mode — messages logged but not sent to phone. <b>Tap SMS/WhatsApp buttons below</b> to actually send.
+      </div>
       <div id="contactsList">
-        <div class="contact-row"><input type="tel" placeholder="Contact 1 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 1 name" class="contact-name"><button class="btn btn-danger" onclick="sendContactSMS(this)">SMS</button></div>
-        <div class="contact-row"><input type="tel" placeholder="Contact 2 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 2 name" class="contact-name"><button class="btn btn-danger" onclick="sendContactSMS(this)">SMS</button></div>
-        <div class="contact-row"><input type="tel" placeholder="Contact 3 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 3 name" class="contact-name"><button class="btn btn-danger" onclick="sendContactSMS(this)">SMS</button></div>
+        <div class="contact-row"><input type="tel" placeholder="Contact 1 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 1 name" class="contact-name"><button class="btn btn-primary" style="padding:6px 10px" onclick="sendContactSMS(this,'sms')">📱 SMS</button><button class="btn btn-success" style="padding:6px 10px" onclick="sendContactSMS(this,'whatsapp')">💬 WA</button></div>
+        <div class="contact-row"><input type="tel" placeholder="Contact 2 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 2 name" class="contact-name"><button class="btn btn-primary" style="padding:6px 10px" onclick="sendContactSMS(this,'sms')">📱 SMS</button><button class="btn btn-success" style="padding:6px 10px" onclick="sendContactSMS(this,'whatsapp')">💬 WA</button></div>
+        <div class="contact-row"><input type="tel" placeholder="Contact 3 phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact 3 name" class="contact-name"><button class="btn btn-primary" style="padding:6px 10px" onclick="sendContactSMS(this,'sms')">📱 SMS</button><button class="btn btn-success" style="padding:6px 10px" onclick="sendContactSMS(this,'whatsapp')">💬 WA</button></div>
       </div>
       <button class="btn btn-ghost" style="margin-top:8px" onclick="addContact()">+ Add contact</button>
-      <p style="font-size:12px;color:#64748b;margin-top:10px">Contacts are auto-SMS'd on panic &amp; crash detection.</p>
+      <p style="font-size:12px;color:#64748b;margin-top:10px">On panic: if SMS provider is set, auto-sends. Otherwise use buttons above (opens your SMS/WhatsApp app).</p>
     </div>
     <div class="card">
       <h2>📜 SMS / Alert Log</h2>
@@ -848,30 +851,38 @@ function addContact() {
   const list = document.getElementById('contactsList');
   const row = document.createElement('div');
   row.className = 'contact-row';
-  row.innerHTML = `<input type="tel" placeholder="Contact phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact name" class="contact-name"><button class="btn btn-danger" onclick="sendContactSMS(this)">SMS</button>`;
+  row.innerHTML = `<input type="tel" placeholder="Contact phone" class="contact-phone" maxlength="10"><input type="text" placeholder="Contact name" class="contact-name"><button class="btn btn-primary" style="padding:6px 10px" onclick="sendContactSMS(this,'sms')">📱 SMS</button><button class="btn btn-success" style="padding:6px 10px" onclick="sendContactSMS(this,'whatsapp')">💬 WA</button>`;
   list.appendChild(row);
 }
 
-async function sendContactSMS(btn) {
+async function sendContactSMS(btn, mode = 'sms') {
   const row = btn.parentElement;
   const phone = row.querySelector('.contact-phone').value.trim();
   const name = row.querySelector('.contact-name').value.trim() || 'Contact';
-  if (!phone) { toast('Enter phone number', 'error'); return; }
+  if (!phone || phone.length !== 10) { toast('Enter 10-digit phone', 'error'); return; }
   const loc = myLat ? `${myLat.toFixed(4)}, ${myLng.toFixed(4)}` : 'location pending';
   const msg = `EMERGENCY from ${currentUser.name}: I need help! Location: ${loc}`;
-  // Log to backend
+  // Also log to backend (tries Fast2SMS/Twilio if configured)
   try { await fetch(API + '/api/sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, message: msg }) }); } catch (e) {}
-  // Open native SMS app (works on mobile — real SMS from your phone)
+
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (isMobile) {
-    window.location.href = 'sms:' + phone + '?body=' + encodeURIComponent(msg);
-    toast('Opening SMS app — press Send', 'success');
-    log('patientLog', `SMS app opened for ${name} (${phone})`, 'type');
+  if (mode === 'whatsapp') {
+    // WhatsApp deep link — opens WhatsApp with pre-filled message
+    const waUrl = `https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`;
+    if (isMobile) { window.open(waUrl, '_blank'); toast('Opening WhatsApp — press Send', 'success'); }
+    else { navigator.clipboard?.writeText(msg); toast('Message copied. Open WhatsApp and send to +91' + phone, 'info', 6000); }
+    log('patientLog', `WhatsApp to ${name} (+91${phone})`, 'type');
   } else {
-    // Desktop: copy to clipboard and show
-    navigator.clipboard?.writeText(msg);
-    toast('Message copied. Paste into your SMS app and send to ' + phone, 'info', 6000);
-    log('patientLog', `Message copied for ${name} (${phone})`, 'type');
+    // Native SMS app
+    if (isMobile) {
+      window.location.href = 'sms:+91' + phone + '?body=' + encodeURIComponent(msg);
+      toast('Opening SMS app — press Send', 'success');
+      log('patientLog', `SMS app opened for ${name} (${phone})`, 'type');
+    } else {
+      navigator.clipboard?.writeText(msg);
+      toast('Message copied. Paste into your SMS app and send to +91' + phone, 'info', 6000);
+      log('patientLog', `Message copied for ${name} (${phone})`, 'type');
+    }
   }
   pollData();
 }
@@ -1241,7 +1252,24 @@ async function pollData() {
       const r2 = await fetch(API + '/sms-log');
       const sms = await r2.json();
       const el = document.getElementById('smsLog');
-      if (sms.length) el.innerHTML = sms.map(s => `<div class="sms-log-entry"><span class="phone">${s.phone}</span> <span class="status badge badge-${s.status === 'sent' ? 'green' : s.status === 'failed' ? 'red' : 'blue'}">${s.status === 'demo' ? 'demo-mode' : s.status}</span><br>${s.message}</div>`).join('');
+      if (sms.length) el.innerHTML = sms.map(s => `<div class="sms-log-entry"><span class="phone">${s.phone}</span> <span class="status badge badge-${s.status === 'sent' ? 'green' : s.status === 'failed' ? 'red' : 'blue'}">${s.provider && s.provider !== 'demo' ? s.provider + ': ' : ''}${s.status}</span><br>${s.message}</div>`).join('');
+      // SMS provider banner
+      if (!window._smsChecked) {
+        window._smsChecked = true;
+        try {
+          const rs = await fetch(API + '/api/sms-status');
+          const st = await rs.json();
+          const banner = document.getElementById('smsProviderBanner');
+          if (banner) {
+            if (st.provider !== 'demo') {
+              banner.style.background = '#064e3b'; banner.style.borderColor = '#10b981'; banner.style.color = '#6ee7b7';
+              banner.innerHTML = `✅ SMS: <b>${st.provider.toUpperCase()}</b> active — automatic SMS works on panic.`;
+            } else {
+              banner.innerHTML = `⚠️ SMS: Demo mode. <b>Use SMS / WhatsApp buttons</b> below to actually send from your phone. For automatic SMS, set <code>FAST2SMS_API_KEY</code> env var (free at fast2sms.com).`;
+            }
+          }
+        } catch (e) {}
+      }
     }
 
     if (currentRole === 'ambulance') {

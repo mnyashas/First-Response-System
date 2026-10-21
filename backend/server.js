@@ -109,36 +109,68 @@ async function getRoute(fromLat, fromLng, toLat, toLng) {
 }
 
 // ==================== SMS ====================
-// Real SMS: set env vars TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM to send real SMS via Twilio.
-// Without them, messages are logged in demo mode (visible in patient SMS log UI).
+// Priority: Fast2SMS (free, India) > Twilio > demo mode
+// Fast2SMS: set env FAST2SMS_API_KEY (get free key at https://www.fast2sms.com)
+// Twilio: set TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM
+function smsProvider() {
+  if (process.env.FAST2SMS_API_KEY) return 'fast2sms';
+  if (process.env.TWILIO_SID && process.env.TWILIO_TOKEN && process.env.TWILIO_FROM) return 'twilio';
+  return 'demo';
+}
+
 async function sendSMS(phone, message) {
-  const entry = { id: uuidv4(), phone, message, timestamp: new Date().toISOString(), status: 'demo' };
-  const sid = process.env.TWILIO_SID, token = process.env.TWILIO_TOKEN, from = process.env.TWILIO_FROM;
-  if (sid && token && from) {
+  const entry = { id: uuidv4(), phone, message, timestamp: new Date().toISOString(), status: 'demo', provider: 'demo' };
+  const provider = smsProvider();
+  entry.provider = provider;
+  const cleanPhone = String(phone).replace(/^\+91/, '').replace(/\D/g, '');
+
+  if (provider === 'fast2sms') {
+    // Fast2SMS free API (India) — route: 'q' for transactional, 'sms' for promotional
     try {
+      const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: { 'authorization': process.env.FAST2SMS_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route: 'q', variables_values: message, numbers: cleanPhone })
+      });
+      const data = await res.json();
+      entry.status = data.return ? 'sent' : 'failed';
+      if (data.message) entry.error = data.message;
+      console.log(`[SMS:fast2sms:${entry.status}] -> ${cleanPhone}: ${data.message || ''}`);
+    } catch (e) {
+      entry.status = 'failed'; entry.error = e.message;
+      console.log(`[SMS:fast2sms:error] ${e.message}`);
+    }
+  } else if (provider === 'twilio') {
+    try {
+      const sid = process.env.TWILIO_SID, token = process.env.TWILIO_TOKEN, from = process.env.TWILIO_FROM;
       const auth = Buffer.from(sid + ':' + token).toString('base64');
-      const params = new URLSearchParams({ To: phone.startsWith('+') ? phone : '+91' + phone, From: from, Body: message });
+      const params = new URLSearchParams({ To: '+' + cleanPhone, From: from, Body: message });
       const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: 'POST', headers: { 'Authorization': 'Basic ' + auth, 'Content-Type': 'application/x-www-form-urlencoded' }, body: params
       });
       const data = await res.json();
       entry.status = res.ok ? 'sent' : 'failed';
-      entry.provider = 'twilio';
       if (data.error_message) entry.error = data.error_message;
-      console.log(`[SMS:twilio:${entry.status}] -> ${phone}`);
+      console.log(`[SMS:twilio:${entry.status}] -> ${cleanPhone}`);
     } catch (e) {
       entry.status = 'failed'; entry.error = e.message;
       console.log(`[SMS:twilio:error] ${e.message}`);
     }
   } else {
-    // Demo mode — message is logged and shown in the SMS log UI
+    // Demo mode — logged, visible in UI
     console.log(`[SMS:demo] -> ${phone}: ${message}`);
   }
+
   db.smsLog.push(entry);
   if (db.smsLog.length > 200) db.smsLog = db.smsLog.slice(-200);
   saveDB();
   return entry;
 }
+
+// SMS provider status endpoint
+app.get('/api/sms-status', (req, res) => {
+  res.json({ provider: smsProvider(), fast2sms: !!process.env.FAST2SMS_API_KEY, twilio: !!(process.env.TWILIO_SID && process.env.TWILIO_TOKEN && process.env.TWILIO_FROM) });
+});
 
 // ==================== AUTH ====================
 app.post('/auth/register', (req, res) => {
