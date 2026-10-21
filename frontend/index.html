@@ -1309,12 +1309,8 @@ async function pollData() {
 }
 
 // ==================== INIT ====================
-window.addEventListener('load', () => {
-  const saved = localStorage.getItem('frs_user');
-  if (saved) {
-    try { currentUser = JSON.parse(saved); currentRole = currentUser.role; showDashboard(); } catch (e) {}
-  }
-});
+// Always show login page on load — no auto-login
+
 </script>
 </body>
 </html>
