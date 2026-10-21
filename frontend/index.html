@@ -320,7 +320,7 @@ tr:hover td{background:#0f172a}
           <label>Status</label>
           <select id="ambStatus" onchange="updateAmbStatus()">
             <option value="available">Available</option>
-            <option value="busy">Busy</option>
+            <option value="assigned">Assigned</option>
             <option value="offline">Offline</option>
           </select>
         </div>
@@ -455,7 +455,7 @@ tr:hover td{background:#0f172a}
         <span><span class="swatch" style="background:#10b981"></span>Ambulance</span>
         <span><span class="swatch" style="background:#f59e0b"></span>Route</span>
       </div>
-      <p style="font-size:12px;color:#64748b;margin-top:8px">Click anywhere on the map to place a road block → routes get recalculated automatically.</p>
+      <p style="font-size:12px;color:#64748b;margin-top:8px">Click <b>START</b> then <b>END</b> on the map to block a road segment. Routes crossing it get reassigned automatically.</p>
     </div>
 
     <div class="card">
@@ -464,23 +464,21 @@ tr:hover td{background:#0f172a}
         <label>Reason</label>
         <input type="text" id="blockReason" placeholder="e.g. Accident, Construction, VIP movement">
       </div>
-      <div class="form-row">
-        <div>
-          <label>Latitude</label>
-          <input type="text" id="blockLat" placeholder="Click map or enter">
-        </div>
-        <div>
-          <label>Longitude</label>
-          <input type="text" id="blockLng" placeholder="Click map or enter">
-        </div>
-      </div>
-      <div class="form-row-full">
-        <label>Radius (km)</label>
-        <input type="number" id="blockRadius" value="1" min="0.1" step="0.1">
+      <div id="blockSegStatus" style="background:#0f172a;border:1px solid #1e293b;border-radius:8px;padding:12px;margin-bottom:12px;font-size:13px;color:#9ca3af">
+        <div id="segStep1">📍 Step 1: Click <b>Set Start Point</b> then click on the map</div>
+        <div id="segStep2" class="hidden" style="margin-top:6px">📍 Step 2: Click <b>Set End Point</b> then click on the map</div>
+        <div id="segCoords" style="margin-top:8px;color:#60a5fa" class="hidden">Start: <b id="segStart">—</b> → End: <b id="segEnd">—</b></div>
       </div>
       <div class="form-row">
-        <button class="btn btn-danger" onclick="setRoadBlock()">🚧 Set Road Block</button>
-        <button class="btn btn-success" onclick="clearAllBlocks()">✅ Clear All</button>
+        <button class="btn btn-primary" id="btnSegStart" onclick="startSegPoint('A')">📍 Set Start Point</button>
+        <button class="btn btn-primary" id="btnSegEnd" onclick="startSegPoint('B')" disabled>📍 Set End Point</button>
+      </div>
+      <div class="form-row">
+        <button class="btn btn-danger" onclick="setRoadBlock()">🚧 Block This Segment</button>
+        <button class="btn btn-ghost" onclick="resetSeg()">🔄 Reset</button>
+      </div>
+      <div class="form-row">
+        <button class="btn btn-success" style="width:100%" onclick="clearAllBlocks()">✅ Clear All Blocks</button>
       </div>
       <div style="margin-top:14px">
         <h3>Active Blocks</h3>
@@ -993,19 +991,64 @@ async function markERReady() {
 }
 
 // ==================== POLICE ====================
+let segPointA = null, segPointB = null, segMode = null, segLine = null, segMarkers = [];
+
+function startSegPoint(which) {
+  segMode = which;
+  toast(which === 'A' ? 'Click map to set START point' : 'Click map to set END point', 'info');
+}
+
+function resetSeg() {
+  segPointA = segPointB = segMode = null;
+  if (segLine) { policeMap.removeLayer(segLine); segLine = null; }
+  segMarkers.forEach(m => policeMap.removeLayer(m));
+  segMarkers = [];
+  document.getElementById('segStep1').classList.remove('hidden');
+  document.getElementById('segStep2').classList.add('hidden');
+  document.getElementById('segCoords').classList.add('hidden');
+  document.getElementById('btnSegStart').disabled = false;
+  document.getElementById('btnSegEnd').disabled = true;
+  document.getElementById('segStart').textContent = '—';
+  document.getElementById('segEnd').textContent = '—';
+}
+
+function onSegMapClick(lat, lng) {
+  if (!segMode) { toast('Click "Set Start Point" first', 'error'); return; }
+  const pt = { lat, lng };
+  if (segMode === 'A') {
+    segPointA = pt;
+    document.getElementById('segStart').textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    document.getElementById('segStep1').classList.add('hidden');
+    document.getElementById('segStep2').classList.remove('hidden');
+    document.getElementById('segCoords').classList.remove('hidden');
+    document.getElementById('btnSegStart').disabled = true;
+    document.getElementById('btnSegEnd').disabled = false;
+    segMarkers.push(L.circleMarker([lat, lng], { radius: 8, color: '#3b82f6', fillColor: '#2563eb', fillOpacity: .9 }).addTo(policeMap).bindPopup('Start'));
+    segMode = 'B';
+    toast('Start set. Now click "Set End Point" then click map', 'success');
+  } else if (segMode === 'B') {
+    segPointB = pt;
+    document.getElementById('segEnd').textContent = lat.toFixed(5) + ', ' + lng.toFixed(5);
+    segMarkers.push(L.circleMarker([lat, lng], { radius: 8, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(policeMap).bindPopup('End'));
+    if (segLine) policeMap.removeLayer(segLine);
+    segLine = L.polyline([[segPointA.lat, segPointA.lng], [lat, lng]], { color: '#ef4444', weight: 6, opacity: .8, dashArray: '10 6' }).addTo(policeMap);
+    segMode = null;
+    document.getElementById('btnSegEnd').disabled = true;
+    toast('Segment ready — enter reason and click "Block This Segment"', 'success');
+  }
+}
+
 async function setRoadBlock() {
   const reason = document.getElementById('blockReason').value.trim();
-  const lat = parseFloat(document.getElementById('blockLat').value);
-  const lng = parseFloat(document.getElementById('blockLng').value);
-  const radius = parseFloat(document.getElementById('blockRadius').value) || 1;
   if (!reason) { toast('Enter a reason', 'error'); return; }
-  if (isNaN(lat) || isNaN(lng)) { toast('Click the map or enter coordinates', 'error'); return; }
+  if (!segPointA || !segPointB) { toast('Set start and end points on the map first', 'error'); return; }
   try {
-    const r = await fetch(API + '/police/roadblock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason, lat, lng, radius, createdBy: currentUser.id }) });
+    const r = await fetch(API + '/police/roadblock', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason, pointA: segPointA, pointB: segPointB, createdBy: currentUser.id }) });
     const d = await r.json();
     if (!r.ok) return toast(d.error, 'error');
-    toast('Road block set — routes recalculated', 'success');
+    toast(`Segment blocked${d.reassigned ? ' — ' + d.reassigned + ' route(s) reassigned!' : ''}`, 'success');
     document.getElementById('blockReason').value = '';
+    resetSeg();
     loadBlocks();
   } catch (e) { toast('Error: ' + e.message, 'error'); }
 }
@@ -1037,8 +1080,11 @@ async function loadBlocks() {
     const blocks = await r.json();
     const active = blocks.filter(b => b.active);
     const el = document.getElementById('blockList');
-    if (!active.length) { el.innerHTML = '<p style="color:#64748b;font-size:13px">No blocks.</p>'; return; }
-    el.innerHTML = active.map(b => `<div class="alert-card"><b>${b.reason}</b><p style="font-size:12px;color:#fca5a5">${b.lat.toFixed(4)}, ${b.lng.toFixed(4)} · ${b.radius}km</p><button class="btn btn-success" style="margin-top:6px;padding:4px 12px;font-size:12px" onclick="clearBlock('${b.id}')">Clear</button></div>`).join('');
+    if (!active.length) { el.innerHTML = '<p style="color:#64748b;font-size:13px">No blocks.</p>'; drawBlockMarkers([]); return; }
+    el.innerHTML = active.map(b => {
+      const loc = b.pointA ? `${b.pointA.lat.toFixed(4)},${b.pointA.lng.toFixed(4)} → ${b.pointB.lat.toFixed(4)},${b.pointB.lng.toFixed(4)}` : `${b.lat.toFixed(4)}, ${b.lng.toFixed(4)} · ${b.radius}km`;
+      return `<div class="alert-card"><b>${b.reason}</b><p style="font-size:12px;color:#fca5a5">${loc}</p><button class="btn btn-success" style="margin-top:6px;padding:4px 12px;font-size:12px" onclick="clearBlock('${b.id}')">Clear</button></div>`;
+    }).join('');
     drawBlockMarkers(active);
   } catch (e) {}
 }
@@ -1054,9 +1100,18 @@ function drawBlockMarkers(blocks) {
   blockMarkers.forEach(m => policeMap.removeLayer(m));
   blockMarkers = [];
   blocks.forEach(b => {
-    const m = L.circleMarker([b.lat, b.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .7 }).addTo(policeMap).bindPopup(`🚧 ${b.reason}`);
-    const c = L.circle([b.lat, b.lng], { radius: b.radius * 1000, color: '#ef4444', fillOpacity: .1 }).addTo(policeMap);
-    blockMarkers.push(m, c);
+    if (b.pointA && b.pointB) {
+      // Segment block: draw line + endpoint markers
+      const line = L.polyline([[b.pointA.lat, b.pointA.lng], [b.pointB.lat, b.pointB.lng]], { color: '#ef4444', weight: 6, opacity: .8, dashArray: '10 6' }).addTo(policeMap);
+      const m1 = L.circleMarker([b.pointA.lat, b.pointA.lng], { radius: 8, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .8 }).addTo(policeMap).bindPopup(`🚧 ${b.reason} (start)`);
+      const m2 = L.circleMarker([b.pointB.lat, b.pointB.lng], { radius: 8, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .8 }).addTo(policeMap).bindPopup(`🚧 ${b.reason} (end)`);
+      blockMarkers.push(line, m1, m2);
+    } else {
+      // Legacy circle block
+      const m = L.circleMarker([b.lat, b.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .7 }).addTo(policeMap).bindPopup(`🚧 ${b.reason}`);
+      const c = L.circle([b.lat, b.lng], { radius: (b.radius || 1) * 1000, color: '#ef4444', fillOpacity: .1 }).addTo(policeMap);
+      blockMarkers.push(m, c);
+    }
   });
 }
 
@@ -1084,9 +1139,7 @@ function initPoliceMap() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(policeMap);
   setTimeout(() => policeMap.invalidateSize(), 200);
   policeMap.on('click', e => {
-    document.getElementById('blockLat').value = e.latlng.lat.toFixed(6);
-    document.getElementById('blockLng').value = e.latlng.lng.toFixed(6);
-    toast('Coordinates set — enter reason and click Set', 'info');
+    if (segMode) onSegMapClick(e.latlng.lat, e.latlng.lng);
   });
 }
 
@@ -1111,6 +1164,19 @@ function updateMapPosition() {
           else ambMarker.setLatLng([a.lat, a.lng]);
         }
       });
+      // Draw ambulance→patient route from incident.route (already has OSRM geometry)
+      if (activeIncident.route && activeIncident.route.geometry && patientMap) {
+        const latlngs = activeIncident.route.geometry.coordinates.map(c => [c[1], c[0]]);
+        if (patientRouteLine) patientMap.removeLayer(patientRouteLine);
+        patientRouteLine = L.polyline(latlngs, { color: '#10b981', weight: 5, opacity: .85 }).addTo(patientMap).bindPopup('Ambulance → You');
+      }
+      // Draw patient→hospital route from incident.autoRoute
+      if (activeIncident.autoRoute && activeIncident.autoRoute.geometry && patientMap) {
+        const latlngs = activeIncident.autoRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+        if (!window._pHospRoute) window._pHospRoute = null;
+        if (window._pHospRoute) patientMap.removeLayer(window._pHospRoute);
+        window._pHospRoute = L.polyline(latlngs, { color: '#f59e0b', weight: 4, opacity: .7, dashArray: '8 6' }).addTo(patientMap).bindPopup('You → Hospital');
+      }
     }
   }
   if (currentRole === 'ambulance' && ambMap) {
@@ -1182,7 +1248,7 @@ async function pollData() {
       const r3 = await fetch(API + '/ambulances');
       const ambs = await r3.json();
       const body = document.getElementById('fleetBody');
-      body.innerHTML = ambs.map(a => `<tr><td>${a.driverName} (${a.id.slice(0,8)})</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'busy' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type}</td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.lastUpdate ? new Date(a.lastUpdate).toLocaleTimeString() : '—'}</td></tr>`).join('');
+      body.innerHTML = ambs.map(a => `<tr><td>${a.driverName} (${a.id.slice(0,8)})</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'assigned' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type}</td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.lastUpdate ? new Date(a.lastUpdate).toLocaleTimeString() : '—'}</td></tr>`).join('');
       const myAmb = ambs.find(a => a.userId === currentUser.id);
       if (myAmb) {
         const job = incidents.find(i => i.assignedAmbulanceId === myAmb.id && i.status !== 'completed');
@@ -1197,7 +1263,7 @@ async function pollData() {
             else patientMarker2.setLatLng([job.lat, job.lng]);
           }
         }
-        if (job && myAmb.status !== 'busy') { document.getElementById('ambStatus').value = 'busy'; }
+        if (job && myAmb.status !== 'assigned') { document.getElementById('ambStatus').value = 'assigned'; }
       }
       // Draw routes for active job OR pending dispatch
       const routeTarget = activeJob || pendingDispatch;
@@ -1208,7 +1274,7 @@ async function pollData() {
           if (route.geometry && ambMap) {
             const latlngs = route.geometry.coordinates.map(c => [c[1], c[0]]);
             if (ambRouteLine) ambMap.removeLayer(ambRouteLine);
-            ambRouteLine = L.polyline(latlngs, { color: '#ef4444', weight: 5, opacity: .8 }).addTo(ambMap);
+            ambRouteLine = L.polyline(latlngs, { color: '#ef4444', weight: 5, opacity: .8 }).addTo(ambMap).bindPopup('Route to patient');
             document.getElementById('routeInfo').classList.remove('hidden');
             document.getElementById('routeDist').textContent = route.distanceKm;
             document.getElementById('routeEta').textContent = route.eta;
@@ -1216,12 +1282,22 @@ async function pollData() {
           }
           if (!patientMarker2 && routeTarget) { patientMarker2 = L.circleMarker([routeTarget.lat, routeTarget.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(ambMap).bindPopup('Patient'); }
           else if (patientMarker2) patientMarker2.setLatLng([routeTarget.lat, routeTarget.lng]);
-          // Pan map to show route
-          if (myLat && routeTarget.lat) {
+          // Fit bounds only once when route first appears
+          if (!window._ambFitted) {
+            window._ambFitted = true;
             const bounds = L.latLngBounds([[myLat, myLng], [routeTarget.lat, routeTarget.lng]]);
             ambMap.fitBounds(bounds.pad(0.2));
           }
+          // If stage is to_hospital, also draw hospital route
+          const stage = (activeJob || routeTarget).stage;
+          if (stage === 'to_hospital' && (activeJob || routeTarget).autoRoute && (activeJob || routeTarget).autoRoute.geometry) {
+            const hLatlngs = (activeJob || routeTarget).autoRoute.geometry.coordinates.map(c => [c[1], c[0]]);
+            if (ambRouteLine2) ambMap.removeLayer(ambRouteLine2);
+            ambRouteLine2 = L.polyline(hLatlngs, { color: '#3b82f6', weight: 4, opacity: .7, dashArray: '8 6' }).addTo(ambMap).bindPopup('Route to hospital');
+          }
         } catch (e) { console.error('Route draw error:', e); }
+      } else {
+        window._ambFitted = false;
       }
     }
 
@@ -1251,7 +1327,7 @@ async function pollData() {
         const fb = document.getElementById('hospFleetBody');
         if (fb) fb.innerHTML = ambs.map(a => {
           const assignedInc = incidents.find(i => i.assignedAmbulanceId === a.id && i.status !== 'completed');
-          return `<tr><td>${a.id.slice(0,8)}</td><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'busy' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4)+', '+a.lng.toFixed(4) : '—'}</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
+          return `<tr><td>${a.id.slice(0,8)}</td><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'assigned' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4)+', '+a.lng.toFixed(4) : '—'}</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
         }).join('');
       } catch (e) {}
 
@@ -1293,7 +1369,7 @@ async function pollData() {
       const body = document.getElementById('policeFleetBody');
       body.innerHTML = ambs.map(a => {
         const assignedInc = incidents.find(i => i.assignedAmbulanceId === a.id && i.status !== 'completed');
-        return `<tr><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'busy' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.speed ? Math.round(a.speed * 3.6) : 0} km/h</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
+        return `<tr><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'assigned' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.speed ? Math.round(a.speed * 3.6) : 0} km/h</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
       }).join('');
       if (policeMap) {
         ambMarkers.forEach(m => policeMap.removeLayer(m));

@@ -41,8 +41,43 @@ function nearestHospital(lat, lng) {
   return h[0] || null;
 }
 
+function distToSegment(lat, lng, lat1, lng1, lat2, lng2) {
+  // Approx distance in km from point to line segment (using flat-earth approx for small distances)
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  const segLen = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  if (segLen < 0.01) return haversine(lat, lng, lat1, lng1);
+  // Project point onto segment
+  const t = Math.max(0, Math.min(1,
+    ((lat - lat1) * (lat2 - lat1) + (lng - lng1) * (lng2 - lng1)) /
+    ((lat2 - lat1) ** 2 + (lng2 - lng1) ** 2)
+  ));
+  const projLat = lat1 + t * (lat2 - lat1);
+  const projLng = lng1 + t * (lng2 - lng1);
+  return haversine(lat, lng, projLat, projLng);
+}
+
 function isBlocked(lat, lng) {
-  return db.roadBlocks.some(b => b.active && haversine(lat, lng, b.lat, b.lng) <= (b.radius || 1));
+  return db.roadBlocks.some(b => {
+    if (!b.active) return false;
+    if (b.pointA && b.pointB) return distToSegment(lat, lng, b.pointA.lat, b.pointA.lng, b.pointB.lat, b.pointB.lng) <= 0.3;
+    return haversine(lat, lng, b.lat, b.lng) <= (b.radius || 1);
+  });
+}
+
+function routeIntersectsBlock(routeGeometry) {
+  if (!routeGeometry || !routeGeometry.coordinates) return false;
+  const activeBlocks = db.roadBlocks.filter(b => b.active && b.pointA && b.pointB);
+  if (!activeBlocks.length) return false;
+  for (const b of activeBlocks) {
+    for (const coord of routeGeometry.coordinates) {
+      const [lng, lat] = coord;
+      if (distToSegment(lat, lng, b.pointA.lat, b.pointA.lng, b.pointB.lat, b.pointB.lng) <= 0.3) return true;
+    }
+  }
+  return false;
 }
 
 // ==================== OSRM ROUTE ====================
@@ -221,7 +256,7 @@ app.post('/incidents', async (req, res) => {
 
   const typeText = etype.replace(/_/g, ' ').toUpperCase();
   if (amb) {
-    amb.status = 'busy';
+    amb.status = 'assigned';
     if (contacts && contacts.length) {
       contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} — ${typeText}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`); });
     }
@@ -255,7 +290,7 @@ app.post('/incidents/:id/severity', (req, res) => {
     const amb = db.ambulances.find(a => a.id === inc.assignedAmbulanceId);
     if (amb && amb.type !== 'icu') {
       const icu = nearestAmbulance(inc.lat, inc.lng, true);
-      if (icu) { amb.status = 'available'; inc.assignedAmbulanceId = icu.id; icu.status = 'busy'; io.to(icu.socketId).emit('ambulance:dispatch', inc); }
+      if (icu) { amb.status = 'available'; inc.assignedAmbulanceId = icu.id; icu.status = 'assigned'; io.to(icu.socketId).emit('ambulance:dispatch', inc); }
     }
   }
   io.emit('incident:updated', inc);
@@ -276,30 +311,37 @@ app.post('/incidents/:id/status', (req, res) => {
 
 // ==================== ROAD BLOCKS ====================
 app.post('/police/roadblock', async (req, res) => {
-  const { reason, lat, lng, radius, createdBy } = req.body;
-  if (!reason || lat == null || lng == null) return res.status(400).json({ error: 'Reason and coordinates required' });
-  const block = { id: uuidv4(), reason, lat, lng, radius: radius || 1, active: true, createdBy, createdAt: new Date().toISOString() };
+  const { reason, pointA, pointB, lat, lng, radius, createdBy } = req.body;
+  const hasSegment = pointA && pointB && pointA.lat != null && pointB.lat != null;
+  const hasCircle = lat != null && lng != null;
+  if (!reason || (!hasSegment && !hasCircle)) return res.status(400).json({ error: 'Reason and segment (pointA+pointB) or point (lat+lng) required' });
+
+  const block = hasSegment
+    ? { id: uuidv4(), reason, pointA: { lat: pointA.lat, lng: pointA.lng }, pointB: { lat: pointB.lat, lng: pointB.lng }, active: true, createdBy, createdAt: new Date().toISOString() }
+    : { id: uuidv4(), reason, lat, lng, radius: radius || 1, active: true, createdBy, createdAt: new Date().toISOString() };
   db.roadBlocks.push(block);
   io.emit('police:roadblock', block);
 
-  // Reassign affected incidents
+  // Reassign affected incidents whose route crosses the blocked segment
+  let reassigned = 0;
   for (const inc of db.incidents) {
-    if (inc.status === 'assigned' && inc.route && isBlocked(inc.lat, inc.lng)) {
+    if (inc.status === 'assigned' && inc.route && routeIntersectsBlock(inc.route.geometry)) {
       const oldAmb = db.ambulances.find(a => a.id === inc.assignedAmbulanceId);
       const newAmb = nearestAmbulance(inc.lat, inc.lng, inc.severity === 'severe');
       if (newAmb && newAmb.id !== inc.assignedAmbulanceId) {
         if (oldAmb) oldAmb.status = 'available';
         inc.assignedAmbulanceId = newAmb.id;
-        newAmb.status = 'busy';
+        newAmb.status = 'assigned';
         inc.route = await getRoute(newAmb.lat, newAmb.lng, inc.lat, inc.lng);
         io.to(newAmb.socketId).emit('ambulance:dispatch', inc);
         io.emit('incident:updated', inc);
-        sendSMS(newAmb.mobile, `ROUTE CHANGE: Road blocked (${reason}). You are now assigned to patient ${inc.patientName} at ${inc.lat.toFixed(4)}, ${inc.lng.toFixed(4)}. ETA: ${inc.route.eta}.`);
+        sendSMS(newAmb.mobile, `ROUTE CHANGE: Road blocked (${reason}). Assigned to patient ${inc.patientName} at ${inc.lat.toFixed(4)}, ${inc.lng.toFixed(4)}. ETA: ${inc.route.eta}.`);
+        reassigned++;
       }
     }
   }
   saveDB();
-  res.json({ block, message: 'Road blocked. Affected routes reassigned.' });
+  res.json({ block, reassigned, message: hasSegment ? `Road segment blocked. ${reassigned} route(s) reassigned.` : `Area blocked. ${reassigned} route(s) reassigned.` });
 });
 
 app.get('/police/roadblocks', (req, res) => res.json(db.roadBlocks));
