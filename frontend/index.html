@@ -214,6 +214,25 @@ tr:hover td{background:#0f172a}
   <div class="grid2">
     <div class="card">
       <h2>🆘 Emergency Panic</h2>
+      <div style="margin-bottom:14px">
+        <label style="color:#f3f4f6;font-size:13px;text-transform:none;letter-spacing:0">Type of Emergency</label>
+        <select id="emergencyType" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px">
+          <option value="accident">🚗 Accident / Collision</option>
+          <option value="fall">🧓 Fall / Trip</option>
+          <option value="low_bp">📉 Low BP / Fainting</option>
+          <option value="high_bp">📈 High BP</option>
+          <option value="chest_pain">❤️ Chest Pain</option>
+          <option value="breathing">🫁 Breathing Difficulty</option>
+          <option value="bleeding">🩸 Severe Bleeding</option>
+          <option value="burn">🔥 Burn</option>
+          <option value="poisoning">☠️ Poisoning</option>
+          <option value="allergy">🤧 Allergic Reaction</option>
+          <option value="stroke">🧠 Stroke Symptoms</option>
+          <option value="seizure">⚡ Seizure</option>
+          <option value="other">❓ Other</option>
+        </select>
+        <input type="text" id="emergencyNote" placeholder="Optional: describe what happened…" style="width:100%;padding:8px 12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:13px;margin-top:8px">
+      </div>
       <div class="panic-zone">
         <button class="panic-btn" id="panicBtn" onclick="triggerPanic()">SOS<br>PANIC</button>
         <p style="color:#64748b;font-size:13px;margin-top:14px">Tap or <b>shake your phone hard</b> to trigger</p>
@@ -403,11 +422,20 @@ tr:hover td{background:#0f172a}
   </div>
 
   <div class="card">
+    <h2>🚑 Ambulance Fleet Status</h2>
+    <table>
+      <thead><tr><th>Ambulance</th><th>Driver</th><th>Status</th><th>Type</th><th>Position</th><th>Assigned To</th></tr></thead>
+      <tbody id="hospFleetBody"><tr><td colspan="6" style="color:#64748b">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
     <h2>📍 Hospital Map &amp; Route</h2>
     <div id="mapHosp"></div>
     <div class="legend">
       <span><span class="swatch" style="background:#3b82f6"></span>Hospital (you)</span>
       <span><span class="swatch" style="background:#ef4444"></span>Patient</span>
+      <span><span class="swatch" style="background:#10b981"></span>Ambulance</span>
       <span><span class="swatch" style="background:#f59e0b"></span>Route</span>
     </div>
   </div>
@@ -470,8 +498,8 @@ tr:hover td{background:#0f172a}
     <div class="card">
       <h2>🚗 Ambulance Fleet Tracker</h2>
       <table>
-        <thead><tr><th>Ambulance</th><th>Status</th><th>Lat</th><th>Lng</th><th>Speed</th></tr></thead>
-        <tbody id="policeFleetBody"><tr><td colspan="5" style="color:#64748b">Loading…</td></tr></tbody>
+        <thead><tr><th>Driver</th><th>Status</th><th>Type</th><th>Lat</th><th>Lng</th><th>Speed</th><th>Assigned</th></tr></thead>
+        <tbody id="policeFleetBody"><tr><td colspan="7" style="color:#64748b">Loading…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -613,7 +641,18 @@ function initDashboard() {
   pollInterval = setInterval(pollData, 4000);
   pollData();
   if (currentRole === 'patient') { initPatientMap(); startGPS(); }
-  if (currentRole === 'ambulance') { initAmbMap(); startGPS(); }
+  if (currentRole === 'ambulance') {
+    initAmbMap(); startGPS();
+    // Load current status/type from backend
+    fetch(API + '/ambulances').then(r => r.json()).then(ambs => {
+      const me = ambs.find(a => a.userId === currentUser.id);
+      if (me) {
+        document.getElementById('ambStatus').value = me.status;
+        document.getElementById('ambType').value = me.type;
+        log('ambLog', `Loaded: status=${me.status}, type=${me.type}`, 'type');
+      }
+    }).catch(() => {});
+  }
   if (currentRole === 'hospital') { initHospMap(); startGPS(); }
   if (currentRole === 'police') { initPoliceMap(); startGPS(); }
 }
@@ -762,11 +801,17 @@ function cancelCrash() {
 // ==================== PANIC ====================
 async function triggerPanic(reason = 'Manual SOS button') {
   if (!currentUser) { toast('Login first', 'error'); return; }
-  if (myLat == null) { toast('Waiting for GPS lock…', 'error'); return; }
+  if (myLat == null) { toast('Waiting for GPS lock or set location above', 'error'); return; }
   const btn = document.getElementById('panicBtn');
   btn.classList.add('active');
-  log('patientLog', `SOS TRIGGERED: ${reason} @ ${myLat.toFixed(5)}, ${myLng.toFixed(5)}`, 'type');
-  toast('SOS sent — dispatching ambulance…', 'error');
+
+  const isCrash = reason.includes('CRASH') || reason.includes('impact');
+  const emergencyType = isCrash ? 'accident' : (document.getElementById('emergencyType')?.value || 'other');
+  const emergencyNote = document.getElementById('emergencyNote')?.value.trim() || '';
+  const sev = isCrash ? 'severe' : 'normal';
+
+  log('patientLog', `SOS TRIGGERED: ${reason} · Type: ${emergencyType} · Severity: ${sev} @ ${myLat.toFixed(5)}, ${myLng.toFixed(5)}`, 'type');
+  toast(isCrash ? 'CRASH detected — sending ICU ambulance…' : 'SOS sent — dispatching ambulance…', 'error');
 
   const contactEls = document.querySelectorAll('.contact-phone');
   contacts = [];
@@ -779,7 +824,7 @@ async function triggerPanic(reason = 'Manual SOS button') {
   try {
     const r = await fetch(API + '/incidents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       patientId: currentUser.id, patientName: currentUser.name, lat: myLat, lng: myLng,
-      severity: reason.includes('CRASH') ? 'severe' : 'normal', contacts, accuracy: 10
+      severity: sev, emergencyType, emergencyNote, forceICU: isCrash, contacts, accuracy: 10
     })});
     const d = await r.json();
     if (!r.ok) { toast('Error: ' + d.error, 'error'); btn.classList.remove('active'); return; }
@@ -787,8 +832,13 @@ async function triggerPanic(reason = 'Manual SOS button') {
     document.getElementById('incidentInfo').classList.remove('hidden');
     document.getElementById('journeyBox').classList.remove('hidden');
     updateIncidentDisplay();
-    log('patientLog', `Ambulance ${d.ambulance ? d.ambulance.driverName : 'searching…'} dispatched. ETA: ${d.incident.route ? d.incident.route.eta : '…'}`, 'type');
-    toast('Ambulance dispatched! ETA: ' + (d.incident.route ? d.incident.route.eta : 'calculating'), 'success');
+    const typeLabel = d.incident.emergencyType || 'emergency';
+    log('patientLog', `Type: ${typeLabel} · Ambulance ${d.ambulance ? d.ambulance.driverName + (d.ambulance.type === 'icu' ? ' (ICU)' : '') : 'searching…'} dispatched. ETA: ${d.incident.route ? d.incident.route.eta : '…'}`, 'type');
+    if (d.incident.forceICU && d.incident.noICUAvailable) {
+      toast('⚠️ No ICU ambulance available! Sent nearest normal ambulance — hospital alerted.', 'error', 7000);
+    } else {
+      toast('Ambulance dispatched! ETA: ' + (d.incident.route ? d.incident.route.eta : 'calculating'), 'success');
+    }
     setTimeout(() => btn.classList.remove('active'), 3000);
   } catch (e) {
     toast('Network error: ' + e.message, 'error');
@@ -841,15 +891,26 @@ function updateIncidentDisplay() {
   document.getElementById('journeyFill').style.width = ((idx + 1) / stages.length * 100) + '%';
   if (activeIncident.route) document.getElementById('journeyEta').textContent = `ETA: ${activeIncident.route.eta} · ${activeIncident.route.distanceKm}`;
   document.getElementById('incidentStatus').textContent = `Status: ${activeIncident.status} · Stage: ${(activeIncident.stage||'').replace('_',' ')}`;
-  document.getElementById('incidentDetail').textContent = `Severity: ${activeIncident.severity} · Ambulance: ${activeIncident.assignedAmbulanceId || 'searching…'} · Hospital: ${activeIncident.assignedHospitalId || '…'}`;
+  const etype = (activeIncident.emergencyType || 'other').replace(/_/g, ' ');
+  document.getElementById('incidentDetail').textContent = `Type: ${etype} · Severity: ${activeIncident.severity}${activeIncident.forceICU ? ' · ICU required' : ''} · Ambulance: ${activeIncident.assignedAmbulanceId || 'searching…'} · Hospital: ${activeIncident.assignedHospitalId || '…'}${activeIncident.emergencyNote ? ' · 📝 ' + activeIncident.emergencyNote : ''}`;
 }
 
 // ==================== AMBULANCE ====================
 async function updateAmbStatus() {
-  toast('Status → ' + document.getElementById('ambStatus').value, 'info');
+  const status = document.getElementById('ambStatus').value;
+  try {
+    await fetch(API + '/ambulances/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: currentUser.id, status }) });
+    toast('Status → ' + status, 'success');
+    log('ambLog', 'Status changed to ' + status, 'type');
+  } catch (e) { toast('Error saving status', 'error'); }
 }
 async function updateAmbType() {
-  toast('Type → ' + document.getElementById('ambType').value, 'info');
+  const type = document.getElementById('ambType').value;
+  try {
+    await fetch(API + '/ambulances/me', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: currentUser.id, type }) });
+    toast('Vehicle type → ' + (type === 'icu' ? 'ICU / Ventilator' : 'Normal'), 'success');
+    log('ambLog', 'Vehicle type changed to ' + type, 'type');
+  } catch (e) { toast('Error saving type', 'error'); }
 }
 
 function startTracking() { startGPS(); toast('GPS tracking started', 'success'); }
@@ -861,7 +922,8 @@ async function acceptDispatch() {
   pendingDispatch = null;
   document.getElementById('dispatchBanner').classList.add('hidden');
   document.getElementById('activeJob').classList.remove('hidden');
-  document.getElementById('jobTitle').textContent = `Patient: ${activeJob.patientName} · Severity: ${activeJob.severity}`;
+  const jtType = (activeJob.emergencyType || 'other').replace(/_/g, ' ');
+  document.getElementById('jobTitle').textContent = `Patient: ${activeJob.patientName} · ${jtType} · ${activeJob.severity}${activeJob.forceICU ? ' · 🏥 ICU' : ''}`;
   log('ambLog', `Dispatch accepted for ${activeJob.patientName}`, 'type');
   toast('Dispatch accepted', 'success');
   await fetch(API + `/incidents/${activeJob.id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'accepted', stage: 'accepted' }) });
@@ -1127,7 +1189,8 @@ async function pollData() {
         if (job && !activeJob && !pendingDispatch) {
           pendingDispatch = job;
           document.getElementById('dispatchBanner').classList.remove('hidden');
-          document.getElementById('dispatchDetail').textContent = `Patient: ${job.patientName} · Severity: ${job.severity} · Location: ${job.lat.toFixed(4)}, ${job.lng.toFixed(4)} · ETA: ${job.route ? job.route.eta : '…'}`;
+          const etype = (job.emergencyType || 'other').replace(/_/g, ' ');
+          document.getElementById('dispatchDetail').textContent = `Patient: ${job.patientName} · Type: ${etype} · Severity: ${job.severity}${job.forceICU ? ' · ICU REQUIRED' : ''} · Location: ${job.lat.toFixed(4)}, ${job.lng.toFixed(4)} · ETA: ${job.route ? job.route.eta : '…'}${job.emergencyNote ? ' · 📝 ' + job.emergencyNote : ''}`;
           // Show patient on map immediately
           if (ambMap && job.lat) {
             if (!patientMarker2) patientMarker2 = L.circleMarker([job.lat, job.lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(ambMap).bindPopup('Patient: ' + job.patientName);
@@ -1167,8 +1230,31 @@ async function pollData() {
       document.getElementById('hospIncoming').textContent = inc.length;
       const el = document.getElementById('incomingList');
       if (inc.length) {
-        el.innerHTML = inc.map(i => `<div class="alert-card"><b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span><p style="font-size:12px;color:#fca5a5;margin-top:4px">ETA: ${i.autoRoute ? i.autoRoute.eta : '…'} · Stage: ${(i.stage||'').replace('_',' ')}</p><p style="font-size:12px;color:#9ca3af">Lat: ${i.lat.toFixed(4)} · Lng: ${i.lng.toFixed(4)}</p></div>`).join('');
+        el.innerHTML = inc.map(i => {
+          const etype = (i.emergencyType || 'other').replace(/_/g, ' ');
+          const assignedAmb = i.assignedAmbulanceId ? i.assignedAmbulanceId.slice(0, 8) : '…';
+          return `<div class="alert-card${i.severity === 'severe' || i.forceICU ? '' : ' info'}">
+            <b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span> <span class="badge badge-blue">${etype}</span>
+            ${i.forceICU ? '<span class="badge badge-red">ICU</span>' : ''}
+            ${i.noICUAvailable ? '<span class="badge badge-yellow">NO ICU avail</span>' : ''}
+            <p style="font-size:12px;color:#fca5a5;margin-top:4px">ETA: ${i.autoRoute ? i.autoRoute.eta : '…'} · Stage: ${(i.stage||'').replace('_',' ')} · Amb: ${assignedAmb}</p>
+            <p style="font-size:12px;color:#9ca3af">Lat: ${i.lat.toFixed(4)} · Lng: ${i.lng.toFixed(4)}</p>
+            ${i.emergencyNote ? `<p style="font-size:12px;color:#fbbf24">📝 ${i.emergencyNote}</p>` : ''}
+          </div>`;
+        }).join('');
       } else el.innerHTML = '<p style="color:#64748b;font-size:13px">No incoming patients yet.</p><p style="color:#475569;font-size:12px;margin-top:8px">Patients appear here when:<br>1. You set your location (bar above)<br>2. A patient triggers SOS nearby<br>3. This hospital is assigned as nearest</p>';
+
+      // Ambulance fleet table
+      try {
+        const rF = await fetch(API + '/ambulances');
+        const ambs = await rF.json();
+        const fb = document.getElementById('hospFleetBody');
+        if (fb) fb.innerHTML = ambs.map(a => {
+          const assignedInc = incidents.find(i => i.assignedAmbulanceId === a.id && i.status !== 'completed');
+          return `<tr><td>${a.id.slice(0,8)}</td><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'busy' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4)+', '+a.lng.toFixed(4) : '—'}</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
+        }).join('');
+      } catch (e) {}
+
       if (inc.length && hospMap && inc[0].lat) {
         if (!patientMarker3) { patientMarker3 = L.circleMarker([inc[0].lat, inc[0].lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(hospMap).bindPopup('Patient'); }
         else patientMarker3.setLatLng([inc[0].lat, inc[0].lng]);
@@ -1190,7 +1276,12 @@ async function pollData() {
       const el = document.getElementById('policeIncidents');
       const active = incidents.filter(i => i.status !== 'completed');
       if (active.length) {
-        el.innerHTML = active.map(i => `<div class="alert-card"><b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span><p style="font-size:12px;color:#fca5a5">${i.lat.toFixed(4)}, ${i.lng.toFixed(4)} · ${i.status}</p></div>`).join('');
+        el.innerHTML = active.map(i => {
+          const etype = (i.emergencyType || 'other').replace(/_/g, ' ');
+          return `<div class="alert-card"><b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span> <span class="badge badge-blue">${etype}</span>${i.forceICU ? ' <span class="badge badge-red">ICU</span>' : ''}
+          <p style="font-size:12px;color:#fca5a5">${i.lat.toFixed(4)}, ${i.lng.toFixed(4)} · ${i.status} · ${(i.stage||'').replace('_',' ')}</p>
+          ${i.emergencyNote ? `<p style="font-size:12px;color:#fbbf24">📝 ${i.emergencyNote}</p>` : ''}</div>`;
+        }).join('');
         if (policeMap && active[0].lat) {
           if (!window._pIncMarker) window._pIncMarker = L.circleMarker([active[0].lat, active[0].lng], { radius: 10, color: '#ef4444', fillColor: '#dc2626', fillOpacity: .9 }).addTo(policeMap).bindPopup('Incident');
           else window._pIncMarker.setLatLng([active[0].lat, active[0].lng]);
@@ -1200,7 +1291,10 @@ async function pollData() {
       const r6 = await fetch(API + '/ambulances');
       const ambs = await r6.json();
       const body = document.getElementById('policeFleetBody');
-      body.innerHTML = ambs.map(a => `<tr><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : 'red'}">${a.status}</span></td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.speed ? Math.round(a.speed * 3.6) : 0} km/h</td></tr>`).join('');
+      body.innerHTML = ambs.map(a => {
+        const assignedInc = incidents.find(i => i.assignedAmbulanceId === a.id && i.status !== 'completed');
+        return `<tr><td>${a.driverName}</td><td><span class="badge badge-${a.status === 'available' ? 'green' : a.status === 'busy' ? 'red' : 'yellow'}">${a.status}</span></td><td>${a.type === 'icu' ? '🏥 ICU' : 'Normal'}</td><td>${a.lat != null ? a.lat.toFixed(4) : '—'}</td><td>${a.lng != null ? a.lng.toFixed(4) : '—'}</td><td>${a.speed ? Math.round(a.speed * 3.6) : 0} km/h</td><td>${assignedInc ? assignedInc.patientName : '—'}</td></tr>`;
+      }).join('');
       if (policeMap) {
         ambMarkers.forEach(m => policeMap.removeLayer(m));
         ambMarkers = [];

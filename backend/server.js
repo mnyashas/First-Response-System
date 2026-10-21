@@ -167,28 +167,49 @@ app.post('/location', (req, res) => {
 
 app.get('/ambulances', (req, res) => res.json(db.ambulances));
 
+app.post('/ambulances/me', (req, res) => {
+  const { userId, status, type } = req.body;
+  const amb = db.ambulances.find(a => a.userId === userId);
+  if (!amb) return res.status(404).json({ error: 'Ambulance not found' });
+  if (status) amb.status = status;
+  if (type) amb.type = type;
+  saveDB();
+  io.emit('location:update', { id: amb.id, lat: amb.lat, lng: amb.lng, heading: amb.heading, speed: amb.speed, status: amb.status, type: amb.type });
+  console.log(`[AMB] ${amb.driverName} -> status=${amb.status} type=${amb.type}`);
+  res.json(amb);
+});
+
 // ==================== INCIDENTS ====================
 app.post('/incidents', async (req, res) => {
-  const { patientId, patientName, lat, lng, severity, contacts, accuracy } = req.body;
+  const { patientId, patientName, lat, lng, severity, contacts, accuracy, emergencyType, emergencyNote, forceICU } = req.body;
   if (lat == null || lng == null) return res.status(400).json({ error: 'Location required (lat, lng)' });
 
   const id = uuidv4();
   const sev = severity || 'normal';
-  const useICU = sev === 'severe';
-  const amb = nearestAmbulance(lat, lng, useICU);
+  const etype = emergencyType || 'other';
+  const mustBeICU = forceICU || sev === 'severe';
+
+  // ICU-only selection for crashes/severe: strict filter, fallback flagged
+  let amb = null, noICUAvailable = false;
+  if (mustBeICU) {
+    const icuAvail = db.ambulances.filter(a => a.status === 'available' && a.lat != null && a.type === 'icu');
+    icuAvail.sort((a, b) => haversine(lat, lng, a.lat, a.lng) - haversine(lat, lng, b.lat, b.lng));
+    if (icuAvail.length) amb = icuAvail[0];
+    else { noICUAvailable = true; amb = nearestAmbulance(lat, lng, false); }
+  } else {
+    amb = nearestAmbulance(lat, lng, false);
+  }
   const hosp = nearestHospital(lat, lng);
 
   // Calculate real routes
   let routeToPatient = null, routeToHospital = null;
-  if (amb && amb.lat != null) {
-    routeToPatient = await getRoute(amb.lat, amb.lng, lat, lng);
-  }
-  if (hosp && hosp.lat != null) {
-    routeToHospital = await getRoute(lat, lng, hosp.lat, hosp.lng);
-  }
+  if (amb && amb.lat != null) routeToPatient = await getRoute(amb.lat, amb.lng, lat, lng);
+  if (hosp && hosp.lat != null) routeToHospital = await getRoute(lat, lng, hosp.lat, hosp.lng);
 
   const incident = {
-    id, patientId, patientName, lat, lng, accuracy: accuracy || null, severity: sev,
+    id, patientId, patientName, lat, lng, accuracy: accuracy || null,
+    severity: sev, emergencyType: etype, emergencyNote: emergencyNote || '',
+    forceICU: !!mustBeICU, noICUAvailable,
     status: amb ? 'assigned' : 'pending',
     assignedAmbulanceId: amb ? amb.id : null,
     assignedHospitalId: hosp ? hosp.id : null,
@@ -198,30 +219,27 @@ app.post('/incidents', async (req, res) => {
   };
   db.incidents.push(incident);
 
+  const typeText = etype.replace(/_/g, ' ').toUpperCase();
   if (amb) {
     amb.status = 'busy';
-    // SMS to patient contacts
     if (contacts && contacts.length) {
-      contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} has triggered a panic alert. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`); });
+      contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} — ${typeText}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`); });
     }
-    // SMS to ambulance driver
-    if (amb.mobile && /^\d{10}$/.test(amb.mobile)) sendSMS(amb.mobile, `URGENT DISPATCH: Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA to patient: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${sev === 'severe' ? 'ICU-ON-BOARD REQUIRED.' : ''}`);
-    // SMS to hospital
+    if (amb.mobile && /^\d{10}$/.test(amb.mobile)) sendSMS(amb.mobile, `URGENT: ${typeText}. Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${mustBeICU ? (noICUAvailable ? 'ICU UNAVAILABLE — use nearest!' : 'ICU-ON-BOARD REQUIRED.') : ''}${emergencyNote ? ' Note: ' + emergencyNote : ''}`);
     if (hosp) {
       const hospUser = db.users.find(u => u.hospitalId === hosp.id);
-      if (hospUser && hospUser.mobile && /^\d{10}$/.test(hospUser.mobile)) sendSMS(hospUser.mobile, `Incoming patient: ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}.`);
+      if (hospUser && hospUser.mobile && /^\d{10}$/.test(hospUser.mobile)) sendSMS(hospUser.mobile, `Incoming: ${typeText}. Patient ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}.${amb && amb.type === 'icu' ? ' ICU ambulance.' : ''}`);
     }
   }
 
-  // SMS to all registered police
-  const smsMsg = `EMERGENCY ALERT: ${patientName} needs help at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName : 'pending'}. Route: ${routeToPatient ? routeToPatient.distanceKm : 'N/A'}.`;
+  const smsMsg = `ALERT: ${typeText} — ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName + (amb.type === 'icu' ? ' (ICU)' : '') : 'pending'}.`;
   db.policeUnits.forEach(pu => {
     const pUser = db.users.find(u => u.policeId === pu.id);
     if (pUser && pUser.mobile && /^\d{10}$/.test(pUser.mobile)) sendSMS(pUser.mobile, smsMsg);
   });
 
   saveDB();
-  console.log(`[INCIDENT] ${patientName} severity=${sev} ambulance=${amb ? amb.id : 'none'} hospital=${hosp ? hosp.id : 'none'}`);
+  console.log(`[INCIDENT] ${patientName} type=${etype} sev=${sev} icu=${mustBeICU} amb=${amb ? amb.id : 'none'}${noICUAvailable ? ' (NO ICU - fallback)' : ''} hosp=${hosp ? hosp.id : 'none'}`);
   io.emit('incident:created', incident);
   res.json({ incident, ambulance: amb, hospital: hosp });
 });
