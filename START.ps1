@@ -25,14 +25,19 @@ if (Test-Path $envFile) {
 Write-Host "[1/3] Starting server on port 3000..." -ForegroundColor Yellow
 $backendPath = Join-Path $PSScriptRoot 'backend'
 Start-Process -FilePath 'node' -ArgumentList 'server.js' -WorkingDirectory $backendPath -WindowStyle Hidden
-Start-Sleep -Seconds 3
-
-# Verify server
-try {
-    $r = Invoke-WebRequest -Uri 'http://localhost:3000/' -TimeoutSec 5
-    Write-Host "  Server OK ($($r.Content.Length) bytes)" -ForegroundColor Green
-} catch {
-    Write-Host "  Server FAILED: $_" -ForegroundColor Red
+# Verify server (retry up to 20s - cold start can be slow)
+$serverOk = $false
+for ($i = 0; $i -lt 10; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+        $r = Invoke-WebRequest -Uri 'http://localhost:3000/' -TimeoutSec 5
+        Write-Host "  Server OK ($($r.Content.Length) bytes)" -ForegroundColor Green
+        $serverOk = $true
+        break
+    } catch { }
+}
+if (-not $serverOk) {
+    Write-Host "  Server FAILED: could not reach http://localhost:3000 within 20s" -ForegroundColor Red
     exit 1
 }
 
