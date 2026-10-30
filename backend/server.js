@@ -118,8 +118,8 @@ function smsProvider() {
   return 'demo';
 }
 
-async function sendSMS(phone, message) {
-  const entry = { id: uuidv4(), phone, message, timestamp: new Date().toISOString(), status: 'demo', provider: 'demo' };
+async function sendSMS(phone, message, ownerId) {
+  const entry = { id: uuidv4(), phone, message, timestamp: new Date().toISOString(), status: 'demo', provider: 'demo', ownerId: ownerId || null };
   const provider = smsProvider();
   entry.provider = provider;
   const cleanPhone = String(phone).replace(/^\+91/, '').replace(/\D/g, '');
@@ -277,7 +277,7 @@ app.post('/incidents', async (req, res) => {
     id, patientId, patientName, lat, lng, accuracy: accuracy || null,
     severity: sev, emergencyType: etype, emergencyNote: emergencyNote || '',
     forceICU: !!mustBeICU, noICUAvailable,
-    status: amb ? 'assigned' : 'pending',
+    status: 'pending', // stays pending until the ambulance driver actually accepts
     assignedAmbulanceId: amb ? amb.id : null,
     assignedHospitalId: hosp ? hosp.id : null,
     route: routeToPatient, autoRoute: routeToHospital,
@@ -290,19 +290,19 @@ app.post('/incidents', async (req, res) => {
   if (amb) {
     amb.status = 'assigned';
     if (contacts && contacts.length) {
-      contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} — ${typeText}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Ambulance dispatched. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`); });
+      contacts.forEach(c => { if (c.phone && /^\d{10}$/.test(c.phone)) sendSMS(c.phone, `EMERGENCY: ${patientName} — ${typeText}. Location: ${lat.toFixed(4)}, ${lng.toFixed(4)}. Help alerted. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}.`, patientId); });
     }
-    if (amb.mobile && /^\d{10}$/.test(amb.mobile)) sendSMS(amb.mobile, `URGENT: ${typeText}. Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${mustBeICU ? (noICUAvailable ? 'ICU UNAVAILABLE — use nearest!' : 'ICU-ON-BOARD REQUIRED.') : ''}${emergencyNote ? ' Note: ' + emergencyNote : ''}`);
+    if (amb.mobile && /^\d{10}$/.test(amb.mobile)) sendSMS(amb.mobile, `URGENT: ${typeText}. Patient ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. ETA: ${routeToPatient ? routeToPatient.eta : 'calculating'}. ${mustBeICU ? (noICUAvailable ? 'ICU UNAVAILABLE — use nearest!' : 'ICU-ON-BOARD REQUIRED.') : ''}${emergencyNote ? ' Note: ' + emergencyNote : ''}`, patientId);
     if (hosp) {
       const hospUser = db.users.find(u => u.hospitalId === hosp.id);
-      if (hospUser && hospUser.mobile && /^\d{10}$/.test(hospUser.mobile)) sendSMS(hospUser.mobile, `Incoming: ${typeText}. Patient ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}.${amb && amb.type === 'icu' ? ' ICU ambulance.' : ''}`);
+      if (hospUser && hospUser.mobile && /^\d{10}$/.test(hospUser.mobile)) sendSMS(hospUser.mobile, `Incoming: ${typeText}. Patient ${patientName}. Severity: ${sev}. ETA: ${routeToHospital ? routeToHospital.eta : 'calculating'}.${amb && amb.type === 'icu' ? ' ICU ambulance.' : ''}`, patientId);
     }
   }
 
-  const smsMsg = `ALERT: ${typeText} — ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName + (amb.type === 'icu' ? ' (ICU)' : '') : 'pending'}.`;
+  const smsMsg = `ALERT: ${typeText} — ${patientName} at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Severity: ${sev}. Ambulance: ${amb ? amb.driverName + (amb.type === 'icu' ? ' (ICU)' : '') + ' (alerted, awaiting accept)' : 'searching'}.`;
   db.policeUnits.forEach(pu => {
     const pUser = db.users.find(u => u.policeId === pu.id);
-    if (pUser && pUser.mobile && /^\d{10}$/.test(pUser.mobile)) sendSMS(pUser.mobile, smsMsg);
+    if (pUser && pUser.mobile && /^\d{10}$/.test(pUser.mobile)) sendSMS(pUser.mobile, smsMsg, patientId);
   });
 
   saveDB();
@@ -357,7 +357,7 @@ app.post('/police/roadblock', async (req, res) => {
   // Reassign affected incidents whose route crosses the blocked segment
   let reassigned = 0;
   for (const inc of db.incidents) {
-    if (inc.status === 'assigned' && inc.route && routeIntersectsBlock(inc.route.geometry)) {
+    if (['pending', 'accepted', 'assigned'].includes(inc.status) && inc.route && routeIntersectsBlock(inc.route.geometry)) {
       const oldAmb = db.ambulances.find(a => a.id === inc.assignedAmbulanceId);
       const newAmb = nearestAmbulance(inc.lat, inc.lng, inc.severity === 'severe');
       if (newAmb && newAmb.id !== inc.assignedAmbulanceId) {
@@ -404,13 +404,17 @@ app.post('/hospitals/er-ready', (req, res) => {
 });
 
 app.get('/hospitals', (req, res) => res.json(db.hospitals));
-app.get('/sms-log', (req, res) => res.json(db.smsLog.slice(-20)));
+app.get('/sms-log', (req, res) => {
+  let list = db.smsLog;
+  if (req.query.userId) list = list.filter(e => e.ownerId === req.query.userId);
+  res.json(list.slice(-20));
+});
 
 // ==================== ROUTE + SMS API ====================
 app.post('/api/sms', async (req, res) => {
-  const { phone, message } = req.body;
+  const { phone, message, userId } = req.body;
   if (!phone || !message) return res.status(400).json({ error: 'phone and message required' });
-  const entry = await sendSMS(phone, message);
+  const entry = await sendSMS(phone, message, userId);
   res.json(entry);
 });
 

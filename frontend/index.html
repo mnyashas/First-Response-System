@@ -266,7 +266,7 @@ tr:hover td{background:#0f172a}
       <div class="journey hidden" id="journeyBox">
         <h3>🚑 Ambulance Journey</h3>
         <div class="steps" id="journeySteps">
-          <div class="step active" data-stage="dispatched">Dispatched</div>
+          <div class="step active" data-stage="dispatched">Alerted</div>
           <div class="step" data-stage="accepted">Accepted</div>
           <div class="step" data-stage="to_patient">To Patient</div>
           <div class="step" data-stage="onboard">Onboard</div>
@@ -493,7 +493,7 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>🚨 Accident / Incident Alerts</h2>
+      <h2>🚨 Accident / Incident Alerts <span style="float:right"><span id="policeUpdated" style="font-size:11px;color:#64748b;font-weight:400"></span> <button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshPolice()">🔄 Refresh</button></span></h2>
       <div id="policeIncidents"><p style="color:#64748b;font-size:13px">No incidents.</p></div>
     </div>
     <div class="card">
@@ -834,11 +834,11 @@ async function triggerPanic(reason = 'Manual SOS button') {
     document.getElementById('journeyBox').classList.remove('hidden');
     updateIncidentDisplay();
     const typeLabel = d.incident.emergencyType || 'emergency';
-    log('patientLog', `Type: ${typeLabel} · Ambulance ${d.ambulance ? d.ambulance.driverName + (d.ambulance.type === 'icu' ? ' (ICU)' : '') : 'searching…'} dispatched. ETA: ${d.incident.route ? d.incident.route.eta : '…'}`, 'type');
+    log('patientLog', `Type: ${typeLabel} · ${d.ambulance ? `Nearest ambulance notified: ${d.ambulance.driverName}${d.ambulance.type === 'icu' ? ' (ICU)' : ''} — waiting for driver to accept. ETA: ${d.incident.route ? d.incident.route.eta : '…'}` : 'No ambulance available yet — searching…'}`, 'type');
     if (d.incident.forceICU && d.incident.noICUAvailable) {
       toast('⚠️ No ICU ambulance available! Sent nearest normal ambulance — hospital alerted.', 'error', 7000);
     } else {
-      toast('Ambulance dispatched! ETA: ' + (d.incident.route ? d.incident.route.eta : 'calculating'), 'success');
+      toast('SOS received — waiting for an ambulance to accept…', 'info');
     }
     setTimeout(() => btn.classList.remove('active'), 3000);
   } catch (e) {
@@ -863,7 +863,7 @@ async function sendContactSMS(btn, mode = 'sms') {
   const loc = myLat ? `${myLat.toFixed(4)}, ${myLng.toFixed(4)}` : 'location pending';
   const msg = `EMERGENCY from ${currentUser.name}: I need help! Location: ${loc}`;
   // Also log to backend (tries Fast2SMS/Twilio if configured)
-  try { await fetch(API + '/api/sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, message: msg }) }); } catch (e) {}
+  try { await fetch(API + '/api/sms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone, message: msg, userId: currentUser.id }) }); } catch (e) {}
 
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   if (mode === 'whatsapp') {
@@ -899,9 +899,10 @@ function updateIncidentDisplay() {
   });
   document.getElementById('journeyFill').style.width = ((idx + 1) / stages.length * 100) + '%';
   if (activeIncident.route) document.getElementById('journeyEta').textContent = `ETA: ${activeIncident.route.eta} · ${activeIncident.route.distanceKm}`;
-  document.getElementById('incidentStatus').textContent = `Status: ${activeIncident.status} · Stage: ${(activeIncident.stage||'').replace('_',' ')}`;
+  document.getElementById('incidentStatus').textContent = humanStatus(activeIncident);
   const etype = (activeIncident.emergencyType || 'other').replace(/_/g, ' ');
-  document.getElementById('incidentDetail').textContent = `Type: ${etype} · Severity: ${activeIncident.severity}${activeIncident.forceICU ? ' · ICU required' : ''} · Ambulance: ${activeIncident.assignedAmbulanceId || 'searching…'} · Hospital: ${activeIncident.assignedHospitalId || '…'}${activeIncident.emergencyNote ? ' · 📝 ' + activeIncident.emergencyNote : ''}`;
+  const ambText = activeIncident.status === 'pending' ? (activeIncident.assignedAmbulanceId ? 'notified — awaiting acceptance' : 'searching…') : '✅ accepted';
+  document.getElementById('incidentDetail').textContent = `Type: ${etype} · Severity: ${activeIncident.severity}${activeIncident.forceICU ? ' · ICU required' : ''} · Ambulance: ${ambText} · Hospital: ${activeIncident.assignedHospitalId ? 'ready' : '…'}${activeIncident.emergencyNote ? ' · 📝 ' + activeIncident.emergencyNote : ''}`;
 }
 
 // ==================== AMBULANCE ====================
@@ -954,7 +955,7 @@ async function advanceStage() {
   if (idx < stages.length - 1) {
     activeJob.stage = stages[idx + 1];
     updateJobSteps();
-    await fetch(API + `/incidents/${activeJob.id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: activeJob.stage === 'arrived' ? 'completed' : 'assigned', stage: activeJob.stage }) });
+    await fetch(API + `/incidents/${activeJob.id}/status`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: activeJob.stage === 'arrived' ? 'completed' : 'accepted', stage: activeJob.stage }) });
     log('ambLog', `Stage → ${activeJob.stage}`, 'type');
     if (activeJob.stage === 'to_hospital' && activeJob.autoRoute) drawRoute(activeJob.lat, activeJob.lng, 'hospital');
   }
@@ -1235,6 +1236,23 @@ async function drawRoute(toLat, toLng, which) {
 }
 
 // ==================== POLLING ====================
+// Human-readable incident status (no raw codes shown to users)
+function humanStatus(i) {
+  if (!i) return '';
+  const st = i.stage || '', s = i.status;
+  if (st === 'arrived' || s === 'completed') return '🏥 Arrived at hospital';
+  if (st === 'to_hospital') return '🚑 On the way to hospital';
+  if (st === 'onboard') return '🏥 Patient onboard — heading to hospital';
+  if (st === 'to_patient') return '🚑 Ambulance on the way to you';
+  if (st === 'accepted' || s === 'accepted') return '✅ Ambulance accepted — help is on the way';
+  if (st === 'waiting') return '🔍 Searching for an available ambulance…';
+  return '⏳ Ambulance notified — waiting for driver to accept…';
+}
+
+function refreshPolice() {
+  pollData().then(() => toast('Incidents refreshed', 'success')).catch(() => toast('Refresh failed', 'error'));
+}
+
 async function pollData() {
   if (!currentUser) return;
   try {
@@ -1245,11 +1263,11 @@ async function pollData() {
       const latest = mine[mine.length - 1];
       const changed = !activeIncident || activeIncident.stage !== latest.stage || activeIncident.status !== latest.status;
       activeIncident = latest;
-      if (currentRole === 'patient' && changed) { updateIncidentDisplay(); log('patientLog', `Update: ${latest.status} / ${latest.stage}`, 'type'); }
+      if (currentRole === 'patient' && changed) { updateIncidentDisplay(); log('patientLog', humanStatus(latest), 'type'); }
     }
 
     if (currentRole === 'patient') {
-      const r2 = await fetch(API + '/sms-log');
+      const r2 = await fetch(API + '/sms-log?userId=' + currentUser.id);
       const sms = await r2.json();
       const el = document.getElementById('smsLog');
       if (sms.length) el.innerHTML = sms.map(s => `<div class="sms-log-entry"><span class="phone">${s.phone}</span> <span class="status badge badge-${s.status === 'sent' ? 'green' : s.status === 'failed' ? 'red' : 'blue'}">${s.provider && s.provider !== 'demo' ? s.provider + ': ' : ''}${s.status}</span><br>${s.message}</div>`).join('');
@@ -1378,12 +1396,14 @@ async function pollData() {
 
     if (currentRole === 'police') {
       const el = document.getElementById('policeIncidents');
+      const upd = document.getElementById('policeUpdated');
+      if (upd) upd.textContent = 'Updated ' + new Date().toLocaleTimeString();
       const active = incidents.filter(i => i.status !== 'completed');
       if (active.length) {
         el.innerHTML = active.map(i => {
           const etype = (i.emergencyType || 'other').replace(/_/g, ' ');
           return `<div class="alert-card"><b>${i.patientName}</b> <span class="badge badge-${i.severity === 'severe' ? 'red' : 'yellow'}">${i.severity}</span> <span class="badge badge-blue">${etype}</span>${i.forceICU ? ' <span class="badge badge-red">ICU</span>' : ''}
-          <p style="font-size:12px;color:#fca5a5">${i.lat.toFixed(4)}, ${i.lng.toFixed(4)} · ${i.status} · ${(i.stage||'').replace('_',' ')}</p>
+          <p style="font-size:12px;color:#fca5a5">${i.lat.toFixed(4)}, ${i.lng.toFixed(4)} · ${humanStatus(i)}</p>
           ${i.emergencyNote ? `<p style="font-size:12px;color:#fbbf24">📝 ${i.emergencyNote}</p>` : ''}</div>`;
         }).join('');
         if (policeMap && active[0].lat) {
