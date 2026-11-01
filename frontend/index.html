@@ -213,7 +213,7 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>🆘 Emergency Panic</h2>
+      <h2>🆘 Emergency Panic <span style="float:right"><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshDashboard()">🔄 Refresh</button></span></h2>
       <div style="margin-bottom:14px">
         <label style="color:#f3f4f6;font-size:13px;text-transform:none;letter-spacing:0">Type of Emergency</label>
         <select id="emergencyType" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px">
@@ -317,7 +317,7 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>🚑 Dispatch Control</h2>
+      <h2>🚑 Dispatch Control <span style="float:right"><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshDashboard()">🔄 Refresh</button></span></h2>
       <div class="form-row">
         <div>
           <label>Status</label>
@@ -403,7 +403,7 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>🚨 Incoming Patients</h2>
+      <h2>🚨 Incoming Patients <span style="float:right"><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshDashboard()">🔄 Refresh</button></span></h2>
       <div id="incomingList"><p style="color:#64748b;font-size:13px">No incoming patients.</p></div>
     </div>
     <div class="card">
@@ -493,7 +493,7 @@ tr:hover td{background:#0f172a}
 
   <div class="grid2">
     <div class="card">
-      <h2>🚨 Accident / Incident Alerts <span style="float:right"><span id="policeUpdated" style="font-size:11px;color:#64748b;font-weight:400"></span> <button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshPolice()">🔄 Refresh</button></span></h2>
+      <h2>🚨 Accident / Incident Alerts <span style="float:right"><span id="policeUpdated" style="font-size:11px;color:#64748b;font-weight:400"></span> <button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="refreshDashboard()">🔄 Refresh</button></span></h2>
       <div id="policeIncidents"><p style="color:#64748b;font-size:13px">No incidents.</p></div>
     </div>
     <div class="card">
@@ -1249,8 +1249,12 @@ function humanStatus(i) {
   return '⏳ Ambulance notified — waiting for driver to accept…';
 }
 
-function refreshPolice() {
-  pollData().then(() => toast('Incidents refreshed', 'success')).catch(() => toast('Refresh failed', 'error'));
+// Refresh any dashboard: clear resolved cases server-side, then reload everything
+async function refreshDashboard() {
+  let cleared = 0;
+  try { const r = await fetch(API + '/incidents/clear-completed', { method: 'POST' }); const d = await r.json(); cleared = d.removed || 0; } catch (e) {}
+  try { await pollData(); } catch (e) {}
+  toast(cleared ? `Refreshed — ${cleared} resolved case${cleared > 1 ? 's' : ''} cleared` : 'Refreshed', 'success');
 }
 
 async function pollData() {

@@ -313,6 +313,15 @@ app.post('/incidents', async (req, res) => {
 
 app.get('/incidents', (req, res) => res.json(db.incidents));
 
+// Clear resolved (completed) incidents so they don't pile up in dashboards
+app.post('/incidents/clear-completed', (req, res) => {
+  const before = db.incidents.length;
+  db.incidents = db.incidents.filter(i => i.status !== 'completed');
+  const removed = before - db.incidents.length;
+  if (removed) { saveDB(); io.emit('incidents:cleared'); }
+  res.json({ removed });
+});
+
 app.post('/incidents/:id/severity', (req, res) => {
   const inc = db.incidents.find(i => i.id === req.params.id);
   if (!inc) return res.status(404).json({ error: 'Not found' });
