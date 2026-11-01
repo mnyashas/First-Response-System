@@ -558,8 +558,25 @@ function toggleRole(role, el) {
   document.getElementById('regHospitalFields').classList.toggle('hidden', !isHospital);
 }
 
-function showRegister() { document.getElementById('loginForm').classList.add('hidden'); document.getElementById('registerForm').classList.remove('hidden'); document.getElementById('authError').classList.add('hidden'); }
-function showLogin() { document.getElementById('registerForm').classList.add('hidden'); document.getElementById('loginForm').classList.remove('hidden'); document.getElementById('authError').classList.add('hidden'); }
+function carryVal(fromId, toId) {
+  const from = document.getElementById(fromId), to = document.getElementById(toId);
+  if (from && to && from.value.trim()) to.value = from.value;
+}
+function carryAuthFields(fromPrefix, toPrefix) {
+  ['Mobile', 'Name', 'Aadhaar', 'Institution', 'Address', 'Receptionist'].forEach(f => carryVal(fromPrefix + f, toPrefix + f));
+}
+function showRegister() {
+  carryAuthFields('login', 'reg'); // carry everything typed so far — no re-entering
+  document.getElementById('loginForm').classList.add('hidden');
+  document.getElementById('registerForm').classList.remove('hidden');
+  document.getElementById('authError').classList.add('hidden');
+}
+function showLogin() {
+  carryAuthFields('reg', 'login'); // and back again
+  document.getElementById('registerForm').classList.add('hidden');
+  document.getElementById('loginForm').classList.remove('hidden');
+  document.getElementById('authError').classList.add('hidden');
+}
 
 function authError(msg) { const e = document.getElementById('authError'); e.textContent = msg; e.classList.remove('hidden'); }
 

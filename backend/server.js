@@ -464,7 +464,7 @@ io.on('connection', (socket) => {
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 // ==================== START ====================
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log('========================================');
   console.log('  FIRST RESPONSE SYSTEM RUNNING');

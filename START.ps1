@@ -5,8 +5,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  FIRST RESPONSE SYSTEM - STARTING" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Kill old processes
-Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*node*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+# Kill old OUR server (only port 3001 - never touch other projects like Broski on 3000)
+$old = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue
+if ($old) { $old | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue } }
 Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
@@ -22,7 +23,7 @@ if (Test-Path $envFile) {
 }
 
 # Start backend server
-Write-Host "[1/3] Starting server on port 3000..." -ForegroundColor Yellow
+Write-Host "[1/3] Starting server on port 3001..." -ForegroundColor Yellow
 $backendPath = Join-Path $PSScriptRoot 'backend'
 Start-Process -FilePath 'node' -ArgumentList 'server.js' -WorkingDirectory $backendPath -WindowStyle Hidden
 # Verify server (retry up to 20s - cold start can be slow)
@@ -30,14 +31,14 @@ $serverOk = $false
 for ($i = 0; $i -lt 10; $i++) {
     Start-Sleep -Seconds 2
     try {
-        $r = Invoke-WebRequest -Uri 'http://localhost:3000/' -TimeoutSec 5
+        $r = Invoke-WebRequest -Uri 'http://localhost:3001/' -TimeoutSec 5
         Write-Host "  Server OK ($($r.Content.Length) bytes)" -ForegroundColor Green
         $serverOk = $true
         break
     } catch { }
 }
 if (-not $serverOk) {
-    Write-Host "  Server FAILED: could not reach http://localhost:3000 within 20s" -ForegroundColor Red
+    Write-Host "  Server FAILED: could not reach http://localhost:3001 within 20s" -ForegroundColor Red
     exit 1
 }
 
@@ -50,7 +51,7 @@ Remove-Item $urlFile -Force -ErrorAction SilentlyContinue
 
 $bat = @"
 @echo off
-"$cfPath" tunnel --url http://localhost:3000 --no-autoupdate > "$urlFile" 2>&1
+"$cfPath" tunnel --url http://localhost:3001 --no-autoupdate > "$urlFile" 2>&1
 "@
 $batPath = Join-Path $env:TEMP 'frs_tunnel.bat'
 Set-Content -Path $batPath -Value $bat
@@ -68,7 +69,7 @@ if (Test-Path $urlFile) {
 # Check SMS provider
 Write-Host "[3/3] Checking SMS..." -ForegroundColor Yellow
 try {
-    $smsSt = Invoke-RestMethod -Uri 'http://localhost:3000/api/sms-status' -TimeoutSec 5
+    $smsSt = Invoke-RestMethod -Uri 'http://localhost:3001/api/sms-status' -TimeoutSec 5
     if ($smsSt.provider -ne 'demo') {
         Write-Host "  SMS: $($smsSt.provider.ToUpper()) active - automatic SMS works!" -ForegroundColor Green
     } else {
@@ -82,14 +83,14 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "  SYSTEM READY" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  LOCAL:   http://localhost:3000" -ForegroundColor White
+Write-Host "  LOCAL:   http://localhost:3001" -ForegroundColor White
 if ($tunnelUrl) {
     Write-Host "  PUBLIC:  $tunnelUrl" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Open PUBLIC url on ANY device (phone, tablet, laptop)" -ForegroundColor Yellow
     Write-Host "  Works from anywhere with internet!" -ForegroundColor Yellow
 } else {
-    Write-Host "  LAN:     http://192.168.7.93:3000" -ForegroundColor White
+    Write-Host "  LAN:     http://192.168.7.93:3001" -ForegroundColor White
     Write-Host "  (phone must be on same Wi-Fi)" -ForegroundColor Yellow
 }
 Write-Host ""
